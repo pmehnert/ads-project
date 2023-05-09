@@ -1,11 +1,14 @@
+mod rmq;
+
 use std::{
     error::Error,
     fmt, fs,
     io::{self, Write},
-    ops::Range,
     process::{ExitCode, Termination},
     time::{Duration, Instant},
 };
+
+use crate::rmq::{Naive, RMQ};
 
 pub type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
@@ -17,9 +20,18 @@ pub fn main() -> Result<TestResults> {
         (result, elapsed)
     }
 
-    fn run_pd(_input: PredecessorInput) -> (Vec<u64>, usize) { todo!() }
+    fn run_pd(_input: PredecessorInput) -> (Vec<usize>, usize) { todo!() }
 
-    fn run_rmq(_input: RMQInput) -> (Vec<u64>, usize) { todo!() }
+    fn run_rmq(input: RMQInput) -> (Vec<usize>, usize) {
+        // todo do all three implementations need to be run here?
+        // todo get rid of unwrap
+
+        let naive = Naive::new(&input.values);
+        let result = (input.queries.iter())
+            .map(|(lower, upper)| naive.range_min(*lower, *upper).unwrap())
+            .collect();
+        (result, naive.size_bits())
+    }
 
     let mut args = std::env::args().skip(1);
 
@@ -137,7 +149,7 @@ impl PredecessorInput {
 
 pub struct RMQInput {
     values: Vec<u64>,
-    queries: Vec<Range<u64>>,
+    queries: Vec<(usize, usize)>,
 }
 
 impl RMQInput {
@@ -149,8 +161,7 @@ impl RMQInput {
         for line in lines {
             let line = line?;
             let (left, right) = line.split_once(",").ok_or(ParseError::NotARange)?;
-            let (start, end) = (left.parse()?, right.parse()?);
-            queries.push(Range { start, end })
+            queries.push((left.parse()?, right.parse()?))
         }
 
         Ok(Self { values, queries })
