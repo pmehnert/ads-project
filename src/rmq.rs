@@ -9,8 +9,8 @@ pub fn fits_index<Idx: IndexInt>(values: &[u64]) -> bool {
     Idx::try_from(values.len().saturating_sub(1)).is_ok()
 }
 
-/// A trait for types that can be used to answer RMQ queries.
-pub trait RMQ {
+/// A trait for types that can be used to answer RMQs.
+pub trait RangeMinimum {
     // todo size  bits does not belong here. move to global trait
     /// Returns the size of the data structure in bits.
     fn size_bits(&self) -> usize;
@@ -63,11 +63,8 @@ impl<'a, Idx: IndexInt> Naive<'a, Idx> {
     }
 }
 
-impl<'a, Idx: IndexInt> RMQ for Naive<'a, Idx> {
-    fn size_bits(&self) -> usize {
-        // todo remember to make this generic
-        8 * std::mem::size_of::<usize>() * self.table.len()
-    }
+impl<'a, Idx: IndexInt> RangeMinimum for Naive<'a, Idx> {
+    fn size_bits(&self) -> usize { 8 * std::mem::size_of::<Idx>() * self.table.len() }
 
     /// Returns `RMQ(self.values, lower, upper)`
     ///
@@ -90,32 +87,31 @@ impl<'a, Idx: IndexInt> RMQ for Naive<'a, Idx> {
     }
 }
 
-pub struct Log<'a> {
-    table: Vec<usize>,
+pub struct Sparse<'a, Idx: IndexInt> {
+    table: Vec<Idx>,
     values: &'a [u64],
 }
 
-impl<'a> Log<'a> {
+impl<'a, Idx: IndexInt> Sparse<'a, Idx> {
     pub fn new(values: &'a [u64]) -> Self {
+        if !fits_index::<Idx>(values) {
+            index_too_small_fail::<Idx>(values.len());
+        }
         if values.is_empty() {
             return Self { table: Vec::new(), values };
         }
-        // todo would there be an efficient way of computing this?
-        //   1       2       4           log n
-        // (N-0) + (N-1) + (N-3) + ... + (N-?)
-        // 0 + 1 + 3 + ... + log n
 
         let (len, log_len) = (values.len(), values.len().ilog2() as usize);
-        let mut table = vec![0; len * (log_len + 1)];
+        let mut table = vec![Idx::ZERO; len * (log_len + 1)];
 
         let (mut front, tail) = table.split_at_mut(len);
-        front.iter_mut().enumerate().for_each(|(i, dst)| *dst = i);
+        front.iter_mut().enumerate().for_each(|(i, dst)| *dst = i.as_index());
 
         for (k, chunk) in zip(1.., tail.chunks_exact_mut(len)) {
             let num = len - (1 << k) + 1;
             for (i, dst) in chunk[..num].iter_mut().enumerate() {
                 let (a, b) = (front[i], front[i + (1 << k - 1)]);
-                *dst = arg_min(a, b, values);
+                *dst = arg_min(a.as_usize(), b.as_usize(), values).as_index();
             }
             front = chunk;
         }
@@ -123,11 +119,8 @@ impl<'a> Log<'a> {
     }
 }
 
-impl<'a> RMQ for Log<'a> {
-    fn size_bits(&self) -> usize {
-        // todo remember to make this generic
-        8 * std::mem::size_of::<usize>() * self.table.len()
-    }
+impl<'a, Idx: IndexInt> RangeMinimum for Sparse<'a, Idx> {
+    fn size_bits(&self) -> usize { 8 * std::mem::size_of::<Idx>() * self.table.len() }
 
     fn range_min(&self, lower: usize, upper: usize) -> Option<usize> {
         if lower <= upper && upper < self.values.len() {
@@ -136,7 +129,7 @@ impl<'a> RMQ for Log<'a> {
             let left = self.table[offset + lower];
             let right = self.table[offset + upper + 1 - (1 << log_len)];
 
-            Some(arg_min(left, right, &self.values))
+            Some(arg_min(left.as_usize(), right.as_usize(), &self.values))
         } else {
             None
         }
@@ -157,49 +150,55 @@ fn index_too_small_fail<Idx: IndexInt>(len: usize) -> ! {
 
 #[cfg(test)]
 mod test {
-    use crate::rmq::{Log, Naive, RMQ};
+    use crate::rmq::{Naive, RangeMinimum, Sparse};
 
     #[test]
     fn test_empty() {
         let _rmq = Naive::<usize>::new(&[]);
-        let _rmq = Log::new(&[]);
+        let _rmq = Sparse::<usize>::new(&[]);
     }
 
     #[test]
     fn test_one_element() {
         let numbers = &[42];
         test_exhaustive(Naive::<usize>::new(numbers), numbers);
-        test_exhaustive(Log::new(numbers), numbers);
+        test_exhaustive(Sparse::<usize>::new(numbers), numbers);
     }
 
     #[test]
     fn test_spec_example() {
         let numbers = &[1, 0, 3, 7];
         test_exhaustive(Naive::<usize>::new(numbers), numbers);
-        test_exhaustive(Log::new(numbers), numbers);
+        test_exhaustive(Sparse::<usize>::new(numbers), numbers);
     }
 
     #[test]
     fn test_simple_example() {
         let numbers = &[99, 32, 60, 90, 22, 26, 9];
         test_exhaustive(Naive::<usize>::new(numbers), numbers);
-        test_exhaustive(Log::new(numbers), numbers);
+        test_exhaustive(Sparse::<usize>::new(numbers), numbers);
     }
 
     #[test]
     fn test_index_type_limits() {
         let numbers = (0..=255).collect::<Vec<_>>();
         test_exhaustive(Naive::<u8>::new(&numbers), &numbers);
+        test_exhaustive(Sparse::<u8>::new(&numbers), &numbers);
     }
 
     #[should_panic]
     #[test]
-    fn test_index_too_small() {
-        let numbers = (0..=256).collect::<Vec<_>>();
-        let _ = Naive::<u8>::new(&numbers);
+    fn test_index_too_small_naive() {
+        let _ = Naive::<u8>::new(&(0..=256).collect::<Vec<_>>());
     }
 
-    fn test_exhaustive(rmq: impl RMQ, values: &[u64]) {
+    #[should_panic]
+    #[test]
+    fn test_index_too_small_sparse() {
+        let _ = Sparse::<u8>::new(&(0..=256).collect::<Vec<_>>());
+    }
+
+    fn test_exhaustive(rmq: impl RangeMinimum, values: &[u64]) {
         for a in 0..values.len() {
             for b in a..values.len() {
                 let min = (a..=b).min_by_key(|i| values[*i]).unwrap();

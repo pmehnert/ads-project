@@ -10,7 +10,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::rmq::{Naive, RMQ};
+use crate::rmq::{Naive, RangeMinimum};
 
 pub type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
