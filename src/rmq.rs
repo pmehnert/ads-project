@@ -1,4 +1,8 @@
 //! Data structures used to accelerate Range Minimum Queries (RMQ).
+//!
+//! # Range Minimum Queries
+//!
+//! TODO
 
 use std::iter::zip;
 
@@ -15,11 +19,15 @@ pub trait RangeMinimum {
     /// Returns the size of the data structure in bits.
     fn size_bits(&self) -> usize;
 
-    /// Returns `arg min {A[i] | lower <= i <= upper }`:
+    /// Returns `RMQ(lower, upper)` or [`None`] if the range is empty or out of bounds.
+    ///
+    /// See the module level [documentation] for more information.
+    ///
+    /// [documentation]: crate::rmq#range-minimum-queries
     fn range_min(&self, lower: usize, upper: usize) -> Option<usize>;
 }
 
-/// The naive approach for answering range minium queries in `O(1)` time.
+/// The naive approach for answering RMQs in `O(1)` time.
 ///
 /// Stores the answer for every possible query in `table` using `O(n²)` space.
 /// The answers are stored in `n` conceptual segments of size `n`, `n-1`, ..., `1`.
@@ -33,13 +41,13 @@ pub struct Naive<'a, Idx: IndexInt> {
 impl<'a, Idx: IndexInt> Naive<'a, Idx> {
     /// Cosntructs the RMQ data structure using dynamic programming.
     ///
-    /// Starting with ranges of length `1`, the minimum for all ranges with
-    /// length `n+1` are trivially calculated using ranges of length `n`.
-    /// Time complexity of the construction algorithm is in `O(n²)`
+    /// Starting with ranges of length `1`, the RMQ for each ranges of length
+    /// `n+1` is calculated from a range of length `n` and a single additional
+    /// position. Time complexity of the construction algorithm is in `O(n²)`
     ///
     /// # Panics
     ///
-    /// Panics if values cannot be index with `Idx` (see also [`fits_index`]).
+    /// Panics if `values` cannot be index with `Idx` (see also [`fits_index`]).
     pub fn new(values: &'a [u64]) -> Self {
         if !fits_index::<Idx>(values) {
             index_too_small_fail::<Idx>(values.len())
@@ -66,7 +74,7 @@ impl<'a, Idx: IndexInt> Naive<'a, Idx> {
 impl<'a, Idx: IndexInt> RangeMinimum for Naive<'a, Idx> {
     fn size_bits(&self) -> usize { 8 * std::mem::size_of::<Idx>() * self.table.len() }
 
-    /// Returns `RMQ(self.values, lower, upper)`
+    /// Retrieves `RMQ(lower, upper)` from the lookup table.
     ///
     /// First determines the index of the segment containing RMQ values for
     /// ranges of length `upper - lower + 1`. Then retrieves the RMQ value from
@@ -87,12 +95,32 @@ impl<'a, Idx: IndexInt> RangeMinimum for Naive<'a, Idx> {
     }
 }
 
+/// The sparse table approach for answering RMQs in `O(1)` time.
+///
+/// Stores the answeres for every possible query whose length is a power of two
+/// using `O(n log n)` space.
+///
+/// # References
+///
+/// \[1\] Michael A. Bender et al. _Lowest Common Ancestors in Trees and Directed
+/// Acyclic Graphs_. DOI: [10.5555/1120060.1712350]
+///
+/// [10.5555/1120060.1712350]: https://dl.acm.org/doi/10.5555/1120060.1712350
 pub struct Sparse<'a, Idx: IndexInt> {
     table: Vec<Idx>,
     values: &'a [u64],
 }
 
 impl<'a, Idx: IndexInt> Sparse<'a, Idx> {
+    /// Constructs the sparse table data structure using dynamic programming.
+    ///
+    /// Starting with ranges of length `1`, the RMQ for each range of length
+    /// `2^(k+1)` is computed from two consecutive ranges of length `2^k`.
+    /// Time complexity of the construction algorithm is in `O(n log n)`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `values` cannot be index with `Idx` (see also [`fits_index`]).
     pub fn new(values: &'a [u64]) -> Self {
         if !fits_index::<Idx>(values) {
             index_too_small_fail::<Idx>(values.len());
@@ -122,6 +150,11 @@ impl<'a, Idx: IndexInt> Sparse<'a, Idx> {
 impl<'a, Idx: IndexInt> RangeMinimum for Sparse<'a, Idx> {
     fn size_bits(&self) -> usize { 8 * std::mem::size_of::<Idx>() * self.table.len() }
 
+    /// Calculates `RMQ(lower, upper)` using two overlapping ranges from the lookup table.
+    ///
+    /// Both ranges have size `2^k` where `k` is maximal and `2^k` still fits
+    /// into the original range. The first range starts at `lower` and the
+    /// second ends at `upper`.
     fn range_min(&self, lower: usize, upper: usize) -> Option<usize> {
         if lower <= upper && upper < self.values.len() {
             let log_len = usize::ilog2(upper - lower + 1) as usize;
