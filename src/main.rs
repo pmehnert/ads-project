@@ -4,6 +4,7 @@ use std::{
     error::Error,
     fmt, fs,
     io::{self, Write},
+    path::PathBuf,
     process::{ExitCode, Termination},
     time::{Duration, Instant},
 };
@@ -13,6 +14,7 @@ use crate::rmq::{Naive, RMQ};
 pub type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
 pub fn main() -> Result<TestResults> {
+    #[inline(never)]
     fn run_timed<T>(f: impl FnOnce() -> T) -> (T, Duration) {
         let before = Instant::now();
         let result = std::hint::black_box(f());
@@ -24,8 +26,6 @@ pub fn main() -> Result<TestResults> {
 
     fn run_rmq(input: RMQInput) -> (Vec<usize>, usize) {
         // todo do all three implementations need to be run here?
-        // todo get rid of unwrap
-
         let naive = Naive::new(&input.values);
         let result = (input.queries.iter())
             .map(|(lower, upper)| naive.range_min(*lower, *upper).unwrap())
@@ -33,33 +33,17 @@ pub fn main() -> Result<TestResults> {
         (result, naive.size_bits())
     }
 
-    let mut args = std::env::args().skip(1);
-
-    let algo = match args.next().as_deref() {
-        Some("pd") => Ok(Algorithm::Predecessor),
-        Some("rmq") => Ok(Algorithm::RangeMinimumQuery),
-        Some(algo) => Err(format!("unknown algorithm '{}'", algo)),
-        None => Err(format!("missing algorithm parameter")),
-    }?;
-
-    let in_path = args.next().ok_or_else(|| "missing input path")?;
-    let out_path = args.next().ok_or_else(|| "missing output path")?;
-
-    if let Some(arg) = args.next() {
-        return Err(format!("unexpected parameter '{}'", arg).into());
-    }
-
-    let input_file = fs::OpenOptions::new().read(true).open(in_path)?;
+    let args = Arguments::parse()?;
+    let input_file = fs::OpenOptions::new().read(true).open(args.in_path)?;
     let input_reader = io::BufReader::new(input_file);
 
-    // todo should parsing be part of the timed segment
-    let ((output, space), time) = match algo {
+    let ((output, space), time) = match args.algo {
         Algorithm::Predecessor => {
-            let input = PredecessorInput::read(input_reader)?;
+            let input = PredecessorInput::parse(input_reader)?;
             run_timed(|| run_pd(input))
         },
         Algorithm::RangeMinimumQuery => {
-            let input = RMQInput::read(input_reader)?;
+            let input = RMQInput::parse(input_reader)?;
             run_timed(|| run_rmq(input))
         },
     };
@@ -68,24 +52,53 @@ pub fn main() -> Result<TestResults> {
         .write(true)
         .create(true)
         // todo .truncate(true) ?
-        .open(&out_path)?;
+        .open(&args.out_path)?;
 
     output.iter().try_for_each(|x| writeln!(out_file, "{}", x))?;
 
-    Ok(TestResults { algo, time, space })
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct TestResults {
-    algo: Algorithm,
-    time: Duration,
-    space: usize,
+    Ok(TestResults { algo: args.algo, time, space })
 }
 
 #[derive(Debug, Clone, Copy)]
 pub enum Algorithm {
     Predecessor,
     RangeMinimumQuery,
+}
+
+#[derive(Debug, Clone)]
+pub struct Arguments {
+    algo: Algorithm,
+    in_path: PathBuf,
+    out_path: PathBuf,
+}
+
+impl Arguments {
+    pub fn parse() -> Result<Self> {
+        let mut args = std::env::args().skip(1);
+
+        let algo = match args.next().as_deref() {
+            Some("pd") => Ok(Algorithm::Predecessor),
+            Some("rmq") => Ok(Algorithm::RangeMinimumQuery),
+            Some(algo) => Err(format!("unknown algorithm '{}'", algo)),
+            None => Err(format!("missing algorithm parameter")),
+        }?;
+
+        let in_path = args.next().ok_or_else(|| "missing input path")?;
+        let out_path = args.next().ok_or_else(|| "missing output path")?;
+
+        match args.next() {
+            Some(arg) => Err(format!("unexpected parameter '{}'", arg).into()),
+            None => Ok(Self { algo, in_path: in_path.into(), out_path: out_path.into() }),
+        }
+    }
+}
+
+
+#[derive(Debug, Clone, Copy)]
+pub struct TestResults {
+    algo: Algorithm,
+    time: Duration,
+    space: usize,
 }
 
 impl Termination for TestResults {
@@ -134,7 +147,7 @@ pub struct PredecessorInput {
 }
 
 impl PredecessorInput {
-    pub fn read(reader: impl io::BufRead) -> Result<Self> {
+    pub fn parse(reader: impl io::BufRead) -> Result<Self> {
         let mut lines = reader.lines();
         let values = parse_values(&mut lines)?;
 
@@ -153,7 +166,7 @@ pub struct RMQInput {
 }
 
 impl RMQInput {
-    pub fn read(reader: impl io::BufRead) -> Result<Self> {
+    pub fn parse(reader: impl io::BufRead) -> Result<Self> {
         let mut lines = reader.lines();
         let values = parse_values(&mut lines)?;
 
