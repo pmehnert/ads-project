@@ -1,4 +1,5 @@
-mod rmq;
+pub mod int;
+pub mod rmq;
 
 use std::{
     error::Error,
