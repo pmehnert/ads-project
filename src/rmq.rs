@@ -1,7 +1,17 @@
+//! Data structures used to accelerate Range Minimum Queries (RMQ).
+
 use std::iter::zip;
 
-/// Provides functionality for types that can be used to accelerate RMQ queries.
+use crate::int::{AsIndex, IndexInt};
+
+/// Returns true iff `values` can be indexed using `Idx`.
+pub fn fits_index<Idx: IndexInt>(values: &[u64]) -> bool {
+    Idx::try_from(values.len().saturating_sub(1)).is_ok()
+}
+
+/// A trait for types that can be used to answer RMQ queries.
 pub trait RMQ {
+    // todo size  bits does not belong here. move to global trait
     /// Returns the size of the data structure in bits.
     fn size_bits(&self) -> usize;
 
@@ -9,29 +19,42 @@ pub trait RMQ {
     fn range_min(&self, lower: usize, upper: usize) -> Option<usize>;
 }
 
-/// Implements the naive approach for `O(1)` range minimum queries using `O(n²)`
-/// space.
-pub struct Naive<'a> {
-    table: Vec<usize>,
+/// The naive approach for answering range minium queries in `O(1)` time.
+///
+/// Stores the answer for every possible query in `table` using `O(n²)` space.
+/// The answers are stored in `n` conceptual segments of size `n`, `n-1`, ..., `1`.
+/// The segments store answeres for ranges of length `1`, `2`, ..., `n` respectively.
+#[derive(Debug, Clone)]
+pub struct Naive<'a, Idx: IndexInt> {
+    table: Vec<Idx>,
     values: &'a [u64],
 }
 
-impl<'a> Naive<'a> {
+impl<'a, Idx: IndexInt> Naive<'a, Idx> {
     /// Cosntructs the RMQ data structure using dynamic programming.
+    ///
     /// Starting with ranges of length `1`, the minimum for all ranges with
     /// length `n+1` are trivially calculated using ranges of length `n`.
     /// Time complexity of the construction algorithm is in `O(n²)`
+    ///
+    /// # Panics
+    ///
+    /// Panics if values cannot be index with `Idx` (see also [`fits_index`]).
     pub fn new(values: &'a [u64]) -> Self {
+        if !fits_index::<Idx>(values) {
+            index_too_small_fail::<Idx>(values.len())
+        }
+
         // The lookup table has length N + (N-1) + ... + 1
-        let mut table = vec![0; values.len() * (values.len() + 1) / 2];
+        let mut table = vec![Idx::ZERO; values.len() * (values.len() + 1) / 2];
 
         let (mut front, mut tail) = table.split_at_mut(values.len());
-        front.iter_mut().enumerate().for_each(|(i, dst)| *dst = i);
+        front.iter_mut().enumerate().for_each(|(i, dst)| *dst = i.as_index());
 
         for n in 1..values.len() {
             let iter = front.iter().zip(tail.iter_mut()).enumerate();
             for (i, (&min, dst)) in iter.take(values.len() - n) {
-                *dst = arg_min(min, i + n, values);
+                *dst = arg_min(min.as_usize(), i + n, values).as_index();
             }
 
             (front, tail) = tail.split_at_mut(values.len() - n);
@@ -40,12 +63,17 @@ impl<'a> Naive<'a> {
     }
 }
 
-impl<'a> RMQ for Naive<'a> {
+impl<'a, Idx: IndexInt> RMQ for Naive<'a, Idx> {
     fn size_bits(&self) -> usize {
         // todo remember to make this generic
         8 * std::mem::size_of::<usize>() * self.table.len()
     }
 
+    /// Returns `RMQ(self.values, lower, upper)`
+    ///
+    /// First determines the index of the segment containing RMQ values for
+    /// ranges of length `upper - lower + 1`. Then retrieves the RMQ value from
+    /// the lookup table.
     fn range_min(&self, lower: usize, upper: usize) -> Option<usize> {
         if lower <= upper && upper < self.values.len() {
             let len = self.values.len();
@@ -55,7 +83,7 @@ impl<'a> RMQ for Naive<'a> {
             let from = len - (upper - lower) + 1;
             let offset = (len + 1 - from) * (from + len) / 2;
 
-            Some(self.table[offset + lower])
+            Some(self.table[offset + lower].as_usize())
         } else {
             None
         }
@@ -115,13 +143,61 @@ impl<'a> RMQ for Log<'a> {
     }
 }
 
+#[doc(hidden)]
 fn arg_min(rhs: usize, lhs: usize, values: &[u64]) -> usize {
     std::cmp::min_by_key(lhs, rhs, |x| values[*x])
+}
+
+#[doc(hidden)]
+#[cold]
+#[inline(never)]
+fn index_too_small_fail<Idx: IndexInt>(len: usize) -> ! {
+    panic!("index type too small: the maximum is {} but the length is {}", Idx::MAX, len);
 }
 
 #[cfg(test)]
 mod test {
     use crate::rmq::{Log, Naive, RMQ};
+
+    #[test]
+    fn test_empty() {
+        let _rmq = Naive::<usize>::new(&[]);
+        let _rmq = Log::new(&[]);
+    }
+
+    #[test]
+    fn test_one_element() {
+        let numbers = &[42];
+        test_exhaustive(Naive::<usize>::new(numbers), numbers);
+        test_exhaustive(Log::new(numbers), numbers);
+    }
+
+    #[test]
+    fn test_spec_example() {
+        let numbers = &[1, 0, 3, 7];
+        test_exhaustive(Naive::<usize>::new(numbers), numbers);
+        test_exhaustive(Log::new(numbers), numbers);
+    }
+
+    #[test]
+    fn test_simple_example() {
+        let numbers = &[99, 32, 60, 90, 22, 26, 9];
+        test_exhaustive(Naive::<usize>::new(numbers), numbers);
+        test_exhaustive(Log::new(numbers), numbers);
+    }
+
+    #[test]
+    fn test_index_type_limits() {
+        let numbers = (0..=255).collect::<Vec<_>>();
+        test_exhaustive(Naive::<u8>::new(&numbers), &numbers);
+    }
+
+    #[should_panic]
+    #[test]
+    fn test_index_too_small() {
+        let numbers = (0..=256).collect::<Vec<_>>();
+        let _ = Naive::<u8>::new(&numbers);
+    }
 
     fn test_exhaustive(rmq: impl RMQ, values: &[u64]) {
         for a in 0..values.len() {
@@ -130,32 +206,5 @@ mod test {
                 assert_eq!(min, rmq.range_min(a, b).unwrap());
             }
         }
-    }
-
-    #[test]
-    fn test_empty() {
-        let _rmq = Naive::new(&[]);
-        let _rmq = Log::new(&[]);
-    }
-
-    #[test]
-    fn test_one_element() {
-        let numbers = &[42];
-        test_exhaustive(Log::new(numbers), numbers);
-        test_exhaustive(Naive::new(numbers), numbers);
-    }
-
-    #[test]
-    fn test_spec_example() {
-        let numbers = &[1, 0, 3, 7];
-        test_exhaustive(Log::new(numbers), numbers);
-        test_exhaustive(Naive::new(numbers), numbers);
-    }
-
-    #[test]
-    fn test_simple_example() {
-        let numbers = &[99, 32, 60, 90, 22, 26, 9];
-        test_exhaustive(Log::new(numbers), numbers);
-        test_exhaustive(Naive::new(numbers), numbers);
     }
 }

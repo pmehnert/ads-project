@@ -27,7 +27,7 @@ pub fn main() -> Result<TestResults> {
 
     fn run_rmq(input: RMQInput) -> (Vec<usize>, usize) {
         // todo do all three implementations need to be run here?
-        let naive = Naive::new(&input.values);
+        let naive = Naive::<usize>::new(&input.values);
         let result = (input.queries.iter())
             .map(|(lower, upper)| naive.range_min(*lower, *upper).unwrap())
             .collect();
