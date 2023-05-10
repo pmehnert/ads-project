@@ -1,11 +1,7 @@
 use std::iter::zip;
 
 /// Provides functionality for types that can be used to accelerate RMQ queries.
-pub trait RMQ<'a> {
-    // todo this probably doesn't belong in this trait
-    /// Constructs the RMQ data structure for `values`.
-    fn new(values: &'a [u64]) -> Self;
-
+pub trait RMQ {
     /// Returns the size of the data structure in bits.
     fn size_bits(&self) -> usize;
 
@@ -20,13 +16,13 @@ pub struct Naive<'a> {
     values: &'a [u64],
 }
 
-impl<'a> RMQ<'a> for Naive<'a> {
+impl<'a> Naive<'a> {
     /// Cosntructs the RMQ data structure using dynamic programming.
     /// Starting with ranges of length `1`, the minimum for all ranges with
     /// length `n+1` are trivially calculated using ranges of length `n`.
     /// Time complexity of the construction algorithm is in `O(n²)`
-    fn new(values: &'a [u64]) -> Self {
-        // The lookup table has length N + N-1 + ... + 1
+    pub fn new(values: &'a [u64]) -> Self {
+        // The lookup table has length N + (N-1) + ... + 1
         let mut table = vec![0; values.len() * (values.len() + 1) / 2];
 
         let (mut front, mut tail) = table.split_at_mut(values.len());
@@ -42,7 +38,9 @@ impl<'a> RMQ<'a> for Naive<'a> {
         }
         Self { table, values }
     }
+}
 
+impl<'a> RMQ for Naive<'a> {
     fn size_bits(&self) -> usize {
         // todo remember to make this generic
         8 * std::mem::size_of::<usize>() * self.table.len()
@@ -69,8 +67,8 @@ pub struct Log<'a> {
     values: &'a [u64],
 }
 
-impl<'a> RMQ<'a> for Log<'a> {
-    fn new(values: &'a [u64]) -> Self {
+impl<'a> Log<'a> {
+    pub fn new(values: &'a [u64]) -> Self {
         if values.is_empty() {
             return Self { table: Vec::new(), values };
         }
@@ -95,7 +93,9 @@ impl<'a> RMQ<'a> for Log<'a> {
         }
         Self { table, values }
     }
+}
 
+impl<'a> RMQ for Log<'a> {
     fn size_bits(&self) -> usize {
         // todo remember to make this generic
         8 * std::mem::size_of::<usize>() * self.table.len()
@@ -123,7 +123,7 @@ fn arg_min(rhs: usize, lhs: usize, values: &[u64]) -> usize {
 mod test {
     use crate::rmq::{Log, Naive, RMQ};
 
-    fn test_exhaustive<'a>(rmq: impl RMQ<'a>, values: &[u64]) {
+    fn test_exhaustive(rmq: impl RMQ, values: &[u64]) {
         for a in 0..values.len() {
             for b in a..values.len() {
                 let min = (a..=b).min_by_key(|i| values[*i]).unwrap();
