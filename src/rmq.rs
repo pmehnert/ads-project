@@ -15,10 +15,6 @@ pub fn fits_index<Idx: IndexInt>(values: &[u64]) -> bool {
 
 /// A trait for types that can be used to answer RMQs.
 pub trait RangeMinimum {
-    // todo size  bits does not belong here. move to global trait
-    /// Returns the size of the data structure in bits.
-    fn size_bits(&self) -> usize;
-
     /// Returns `RMQ(lower, upper)` or [`None`] if the range is empty or out of bounds.
     ///
     /// See the module level [documentation] for more information.
@@ -69,11 +65,12 @@ impl<'a, Idx: IndexInt> Naive<'a, Idx> {
         }
         Self { table, values }
     }
+
+    /// Returns the size of the allocation in bits.
+    pub fn size_bits(&self) -> usize { 8 * std::mem::size_of::<Idx>() * self.table.len() }
 }
 
 impl<'a, Idx: IndexInt> RangeMinimum for Naive<'a, Idx> {
-    fn size_bits(&self) -> usize { 8 * std::mem::size_of::<Idx>() * self.table.len() }
-
     /// Retrieves `RMQ(lower, upper)` from the lookup table.
     ///
     /// First determines the index of the segment containing RMQ values for
@@ -145,11 +142,12 @@ impl<'a, Idx: IndexInt> Sparse<'a, Idx> {
         }
         Self { table, values }
     }
+
+    /// Returns the size of the allocation in bits.
+    pub fn size_bits(&self) -> usize { 8 * std::mem::size_of::<Idx>() * self.table.len() }
 }
 
 impl<'a, Idx: IndexInt> RangeMinimum for Sparse<'a, Idx> {
-    fn size_bits(&self) -> usize { 8 * std::mem::size_of::<Idx>() * self.table.len() }
-
     /// Calculates `RMQ(lower, upper)` using two overlapping ranges from the lookup table.
     ///
     /// Both ranges have size `2^k` where `k` is maximal and `2^k` still fits
