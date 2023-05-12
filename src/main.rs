@@ -10,7 +10,10 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::rmq::{Naive, RangeMinimum};
+use crate::{
+    int::IndexInt,
+    rmq::{fits_index, Naive, RangeMinimum},
+};
 
 pub type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
@@ -27,11 +30,21 @@ pub fn main() -> Result<TestResults> {
 
     fn run_rmq(input: RMQInput) -> (Vec<usize>, usize) {
         // todo do all three implementations need to be run here?
-        let naive = Naive::<usize>::new(&input.values);
+        match &input.values {
+            // values if fits_index::<u8>(values) => run_rmq_with::<u8>(&input),
+            values if fits_index::<u16>(values) => run_rmq_with::<u16>(&input),
+            values if fits_index::<u32>(values) => run_rmq_with::<u32>(&input),
+            // values if fits_index::<u64>(values) => run_rmq_with::<u64>(&input),
+            _ => run_rmq_with::<usize>(&input),
+        }
+    }
+
+    fn run_rmq_with<Idx: IndexInt>(input: &RMQInput) -> (Vec<usize>, usize) {
+        let rmq = Naive::<Idx>::new(&input.values);
         let result = (input.queries.iter())
-            .map(|(lower, upper)| naive.range_min(*lower, *upper).unwrap())
+            .map(|(lower, upper)| rmq.range_min(*lower, *upper).unwrap())
             .collect();
-        (result, naive.size_bits())
+        (result, rmq.size_bits())
     }
 
     let args = Arguments::parse()?;
@@ -81,15 +94,15 @@ impl Arguments {
             Some("pd") => Ok(Algorithm::Predecessor),
             Some("rmq") => Ok(Algorithm::RangeMinimumQuery),
             Some(algo) => Err(format!("unknown algorithm '{}'", algo)),
-            None => Err(format!("missing algorithm parameter")),
+            None => Err("missing algorithm parameter".to_string()),
         }?;
 
-        let in_path = args.next().ok_or_else(|| "missing input path")?;
-        let out_path = args.next().ok_or_else(|| "missing output path")?;
+        let in_path = PathBuf::from(args.next().ok_or("missing input path")?);
+        let out_path = PathBuf::from(args.next().ok_or("missing output path")?);
 
         match args.next() {
             Some(arg) => Err(format!("unexpected parameter '{}'", arg).into()),
-            None => Ok(Self { algo, in_path: in_path.into(), out_path: out_path.into() }),
+            None => Ok(Self { algo, in_path, out_path }),
         }
     }
 }
@@ -129,6 +142,7 @@ impl fmt::Display for Algorithm {
 enum ParseError {
     MissingValue,
     NotARange,
+    EmptyRange,
 }
 
 impl Error for ParseError {}
@@ -138,6 +152,7 @@ impl fmt::Display for ParseError {
         match self {
             ParseError::MissingValue => write!(f, "mssing a value in the input file"),
             ParseError::NotARange => write!(f, "expected a range in the input file"),
+            ParseError::EmptyRange => write!(f, "found an empty range in the input file"),
         }
     }
 }
@@ -174,7 +189,10 @@ impl RMQInput {
         let mut queries = Vec::with_capacity(lines.size_hint().0);
         for line in lines {
             let line = line?;
-            let (left, right) = line.split_once(",").ok_or(ParseError::NotARange)?;
+            let (left, right) = line.split_once(',').ok_or(ParseError::NotARange)?;
+            if left > right {
+                return Err(ParseError::EmptyRange.into());
+            }
             queries.push((left.parse()?, right.parse()?))
         }
 

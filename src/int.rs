@@ -24,34 +24,37 @@ pub trait IndexInt:
     fn from_usize(value: usize) -> Self;
 
     /// Converts `self` to a [`usize`] using a primitive cast.
-    fn as_usize(self) -> usize;
+    fn to_usize(self) -> usize;
 }
 
 /// Primitive conversion of integers to [`IndexInt`]s.
 pub trait AsIndex: Sized + sealed::Sealed {
     /// Converts `self` to an instance of `Idx` using a primitve cast.
-    fn as_index<Idx: IndexInt>(self) -> Idx;
+    fn to_index<Idx: IndexInt>(self) -> Idx;
 }
 
 impl AsIndex for usize {
-    fn as_index<Idx: IndexInt>(self) -> Idx { Idx::from_usize(self) }
+    fn to_index<Idx: IndexInt>(self) -> Idx { Idx::from_usize(self) }
 }
 
 #[doc(hidden)]
 macro_rules! impl_index_int {
-        ($($type:ty),* $(,)?) => {
-            $(
-                impl IndexInt for $type {
-                    const ZERO: Self = 0;
-                    const MAX: Self = <$type>::MAX;
+    ($($type:ty),* $(,)?) => {
+        $(
+            impl IndexInt for $type {
+                const ZERO: Self = 0;
+                const MAX: Self = <$type>::MAX;
 
-                    fn from_usize(value: usize) -> Self { value as Self }
-
-                    fn as_usize(self) -> usize { self as usize }
+                fn from_usize(value: usize) -> Self {
+                    debug_assert!(Self::try_from(value).is_ok());
+                    value as Self
                 }
-            )*
-        };
-    }
+
+                fn to_usize(self) -> usize { self as usize }
+            }
+        )*
+    };
+}
 
 impl_index_int!(usize, u64, u32, u16, u8);
 

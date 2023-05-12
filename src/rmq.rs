@@ -4,7 +4,7 @@
 //!
 //! TODO
 
-use std::iter::zip;
+use std::{borrow::Borrow, iter::zip};
 
 use crate::int::{AsIndex, IndexInt};
 
@@ -39,7 +39,7 @@ impl<'a, Idx: IndexInt> Naive<'a, Idx> {
     ///
     /// Starting with ranges of length `1`, the RMQ for each ranges of length
     /// `n+1` is calculated from a range of length `n` and a single additional
-    /// position. Time complexity of the construction algorithm is in `O(n²)`
+    /// position. Time complexity of the construction algorithm is in `O(n²)`.
     ///
     /// # Panics
     ///
@@ -49,16 +49,16 @@ impl<'a, Idx: IndexInt> Naive<'a, Idx> {
             index_too_small_fail::<Idx>(values.len())
         }
 
-        // The lookup table has length N + (N-1) + ... + 1
+        // The lookup table has length N + (N-1) + ... + 1.
         let mut table = vec![Idx::ZERO; values.len() * (values.len() + 1) / 2];
 
         let (mut front, mut tail) = table.split_at_mut(values.len());
-        front.iter_mut().enumerate().for_each(|(i, dst)| *dst = i.as_index());
+        front.iter_mut().enumerate().for_each(|(i, dst)| *dst = i.to_index());
 
         for n in 1..values.len() {
             let iter = front.iter().zip(tail.iter_mut()).enumerate();
             for (i, (&min, dst)) in iter.take(values.len() - n) {
-                *dst = arg_min(min.as_usize(), i + n, values).as_index();
+                *dst = arg_min(min.to_usize(), i + n, values).to_index();
             }
 
             (front, tail) = tail.split_at_mut(values.len() - n);
@@ -85,14 +85,14 @@ impl<'a, Idx: IndexInt> RangeMinimum for Naive<'a, Idx> {
             let from = len - (upper - lower) + 1;
             let offset = (len + 1 - from) * (from + len) / 2;
 
-            Some(self.table[offset + lower].as_usize())
+            Some(self.table[offset + lower].to_usize())
         } else {
             None
         }
     }
 }
 
-/// The sparse table approach for answering RMQs in `O(1)` time.
+/// The sparse table \[1\] approach for answering RMQs in `O(1)` time.
 ///
 /// Stores the answeres for every possible query whose length is a power of two
 /// using `O(n log n)` space.
@@ -103,6 +103,7 @@ impl<'a, Idx: IndexInt> RangeMinimum for Naive<'a, Idx> {
 /// Acyclic Graphs_. DOI: [10.5555/1120060.1712350]
 ///
 /// [10.5555/1120060.1712350]: https://dl.acm.org/doi/10.5555/1120060.1712350
+#[derive(Debug, Clone)]
 pub struct Sparse<'a, Idx: IndexInt> {
     table: Vec<Idx>,
     values: &'a [u64],
@@ -130,13 +131,13 @@ impl<'a, Idx: IndexInt> Sparse<'a, Idx> {
         let mut table = vec![Idx::ZERO; len * (log_len + 1)];
 
         let (mut front, tail) = table.split_at_mut(len);
-        front.iter_mut().enumerate().for_each(|(i, dst)| *dst = i.as_index());
+        front.iter_mut().enumerate().for_each(|(i, dst)| *dst = i.to_index());
 
         for (k, chunk) in zip(1.., tail.chunks_exact_mut(len)) {
             let num = len - (1 << k) + 1;
             for (i, dst) in chunk[..num].iter_mut().enumerate() {
-                let (a, b) = (front[i], front[i + (1 << k - 1)]);
-                *dst = arg_min(a.as_usize(), b.as_usize(), values).as_index();
+                let (a, b) = (front[i], front[i + (1 << (k - 1))]);
+                *dst = arg_min(a.to_usize(), b.to_usize(), values).to_index();
             }
             front = chunk;
         }
@@ -160,7 +161,7 @@ impl<'a, Idx: IndexInt> RangeMinimum for Sparse<'a, Idx> {
             let left = self.table[offset + lower];
             let right = self.table[offset + upper + 1 - (1 << log_len)];
 
-            Some(arg_min(left.as_usize(), right.as_usize(), &self.values))
+            Some(arg_min(left.to_usize(), right.to_usize(), &self.values))
         } else {
             None
         }
