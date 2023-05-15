@@ -1,3 +1,4 @@
+pub mod bitvec;
 pub mod int;
 pub mod rmq;
 
