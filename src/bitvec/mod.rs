@@ -7,6 +7,7 @@ use std::{
 use block::{AlignedBlock, BitIndex};
 
 pub mod block;
+pub mod flat_popcount;
 
 pub use block::Block;
 
