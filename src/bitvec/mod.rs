@@ -4,27 +4,26 @@ use std::{
     slice,
 };
 
-pub use block::BitIndex;
-pub use block::Block;
+use block::{AlignedBlock, BitIndex};
 
 pub mod block;
-pub mod select;
+
+pub use block::Block;
 
 /// An iterator over the bits of a bit vector.
 pub type Iter<'a> = Take<Flatten<slice::Iter<'a, Block>>>;
 
-/// A contiguous and compact array of bits, short for 'bit vector'.
+/// A contiguous, cache aligned and compact array of bits, short for 'bit vector'.
 ///
 /// # Invariants
 ///
 /// Bit vectors always uphold the following invariants.
 ///
-/// - All but the last block in `self.blocks` are filled completely.
-/// - The last block in `self.blocks` contains at least one bit.
-/// - All unused positions of the last block in `self.blocks` are set to zero.
+/// - The length of `self.blocks` is the minimum required to store `self.len` bits.
+/// - Any unused position of a block in `self.block` is set to `0`.
 #[derive(Clone, Default, PartialEq, Eq)]
 pub struct BitVec {
-    blocks: Vec<Block>,
+    blocks: Vec<AlignedBlock>,
     len: usize,
 }
 
@@ -47,13 +46,29 @@ impl BitVec {
     pub fn is_empty(&self) -> bool { self.len == 0 }
 
     /// Returns an (inefficient) iterator over the bits of the bit vector.
-    pub fn iter(&self) -> Iter<'_> { self.blocks.iter().flatten().take(self.len) }
+    pub fn iter(&self) -> Iter<'_> { self.blocks().iter().flatten().take(self.len) }
 
     /// Returns a slice containing the underlying blocks of the bit vector.
-    pub fn blocks(&self) -> &[Block] { &self.blocks }
+    ///
+    /// The last [`AlignedBlock::BLOCKS`] elements may contain unused bits, which are
+    /// guranteed to be set to `0`.
+    pub fn aligned_blocks(&self) -> &[AlignedBlock] { &self.blocks }
 
-    /// Returns a mutable slice containing the underlying blocks of the bit vector.
-    pub fn blocks_mut(&mut self) -> &mut [Block] { &mut self.blocks }
+    /// Returns a slice containing the underlying cache aligned blocks of the bit vector.
+    ///
+    /// The last element may contain unused bits, which are guranteed to be set to `0`.
+    pub fn blocks(&self) -> &[Block] {
+        let aligned = self.aligned_blocks();
+
+        // Safety: The multiplication can't overflow, because `aligned` is
+        // already in the address space.
+        let len =
+            unsafe { aligned.len().checked_mul(AlignedBlock::BLOCKS).unwrap_unchecked() };
+
+        // Safety: A pointer to `AlignedBlock` may be safely reinterpreted as
+        // a pointer to `Block`.
+        unsafe { std::slice::from_raw_parts(aligned.as_ptr() as *const Block, len) }
+    }
 }
 
 impl<'a> IntoIterator for &'a BitVec {
@@ -65,17 +80,19 @@ impl<'a> IntoIterator for &'a BitVec {
 
 impl FromIterator<bool> for BitVec {
     fn from_iter<Iter: IntoIterator<Item = bool>>(iter: Iter) -> Self {
-        let mut iter = iter.into_iter().peekable();
+        let mut iter = iter.into_iter().fuse().peekable();
         let cap = (iter.size_hint().0 + Block::BITS as usize - 1) / Block::BITS as usize;
         let (mut blocks, mut len) = (Vec::with_capacity(cap), 0);
 
         while iter.peek().is_some() {
-            let mut block = Block::ALL_ZEROS;
+            let mut aligned = AlignedBlock([Block::ALL_ZEROS; 8]);
 
-            len += zip(0..Block::BITS as u8, iter.by_ref())
-                .map(|(i, bit)| block.0 |= BitIndex(i).mask_value(bit))
-                .count();
-            blocks.push(block);
+            for block in &mut aligned.0 {
+                len += zip(0..Block::BITS as u8, iter.by_ref())
+                    .map(|(i, bit)| block.0 |= BitIndex(i).mask_value(bit))
+                    .count();
+            }
+            blocks.push(aligned);
         }
         Self { blocks, len }
     }

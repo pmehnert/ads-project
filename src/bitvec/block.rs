@@ -1,6 +1,6 @@
 //! The individual blocks of a bit vector.
 
-use std::{iter::FusedIterator, ops::Range};
+use std::{fmt, iter::FusedIterator, ops::Range};
 
 /// An integer in the range of `0..63`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -26,10 +26,22 @@ impl BitIndex {
     pub fn mask_value(self, value: bool) -> u64 { (value as u64) << self.0 }
 }
 
+/// A cache line aligned array of [`Block`]s.
+#[derive(Default, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(C, align(64))]
+pub struct AlignedBlock(pub [Block; Self::BLOCKS]);
+
+impl AlignedBlock {
+    /// The total number of bits in `Self`.
+    pub const BITS: usize = Self::BLOCKS * Block::BITS as usize;
+    /// The number of [`Block`]s in `Self`.
+    pub const BLOCKS: usize = 8;
+}
+
 /// A block of bits in a bit vector.
 ///
 /// The block is in least significant bit first order.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Default, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(transparent)]
 pub struct Block(pub u64);
 
@@ -40,9 +52,6 @@ impl Block {
     pub const ALL_ZEROS: Self = Self(0);
     /// The number of bits in a block.
     pub const BITS: u32 = u64::BITS;
-
-    // todo name?
-    pub fn div_index(index: usize) -> usize { index / Self::BITS as usize }
 
     /// Returns the bit as `index` in the block.
     pub fn get(&self, index: BitIndex) -> bool { self.0 & index.mask_bit() != 0 }
@@ -115,6 +124,18 @@ impl<'a> IntoIterator for &'a Block {
     fn into_iter(self) -> Self::IntoIter { self.iter() }
 }
 
+impl fmt::Debug for AlignedBlock {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_list().entries(self.0).finish()
+    }
+}
+
+impl fmt::Debug for Block {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_list().entries(self).finish()
+    }
+}
+
 /// An iterator over the bits in a block.
 pub struct Iter<'a> {
     block: &'a Block,
@@ -153,6 +174,13 @@ impl<'a> FusedIterator for Iter<'a> {}
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[test]
+    fn test_super_block_alignment() {
+        assert_eq!(64, std::mem::size_of::<AlignedBlock>());
+        assert_eq!(64, std::mem::align_of::<AlignedBlock>());
+        assert_eq!(64, AlignedBlock::BLOCKS * std::mem::size_of::<Block>());
+    }
 
     #[test]
     fn test_rank1() {
