@@ -1,4 +1,4 @@
-use std::{fmt, mem};
+use std::{fmt, iter::zip, mem};
 
 use crate::bitvec::{block::BitIndex, AlignedBlock, BitVec, Block};
 
@@ -12,12 +12,16 @@ mod config {
     pub const L2_PER_L1: usize = L1_SIZE_BITS / L2_SIZE_BITS;
     pub const L1_SIZE_U64: usize = L1_SIZE_BITS / Block::BITS;
     pub const L2_SIZE_U64: usize = L2_SIZE_BITS / Block::BITS;
+
+    pub const SELECT_SAMPLE_RATE: u64 = 8192;
 }
 
 #[derive(Debug, Clone)]
 pub struct FlatPopcount<'a> {
     bitvec: &'a BitVec,
     data: Vec<L1Data>,
+    one_hints: Vec<u32>,
+    total_ones: u64,
 }
 
 /// # Layout
@@ -64,12 +68,26 @@ impl<'a> FlatPopcount<'a> {
             l2_data[aligned_blocks.len() % config::L2_PER_L1..].fill(l1_ones as u16);
         }
         data.push(L1Data::new(pre_l1_ones, l2_data));
+        let total_ones = pre_l1_ones + u64::from(l1_ones);
 
-        Self { bitvec, data }
+        let cap = total_ones.saturating_add(config::SELECT_SAMPLE_RATE - 1)
+            / config::SELECT_SAMPLE_RATE;
+        let mut one_hints = Vec::with_capacity(cap as usize);
+        let mut next_hint = 0;
+        for (i, data) in zip(0.., &data) {
+            if data.l1_ones() >= next_hint {
+                next_hint += config::SELECT_SAMPLE_RATE;
+                one_hints.push(i);
+            }
+        }
+
+        Self { bitvec, data, one_hints, total_ones }
     }
 
     pub fn rank1(&self, index: usize) -> u64 {
-        // todo handle out of bounds
+        if index >= self.bitvec.len() {
+            index_out_of_bounds_fail(index, self.bitvec.len());
+        }
 
         let l1_index = index / config::L1_SIZE_BITS;
         let sub_index = index % config::L1_SIZE_BITS;
@@ -151,6 +169,14 @@ impl fmt::Debug for L1Data {
             .field("l2_ones", &l2_ones)
             .finish()
     }
+}
+
+#[doc(hidden)]
+#[cold]
+#[inline(never)]
+#[track_caller]
+fn index_out_of_bounds_fail(index: usize, len: usize) -> ! {
+    panic!("index out of bounds: the length is {} but the index is {}", len, index)
 }
 
 #[cfg(test)]
