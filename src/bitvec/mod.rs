@@ -4,12 +4,15 @@ use std::{
     slice,
 };
 
-use block::{AlignedBlock, BitIndex};
+pub use block::Block;
+
+use crate::{
+    bitvec::block::{AlignedBlock, BitIndex},
+    div_ceil,
+};
 
 pub mod block;
 pub mod flat_popcount;
-
-pub use block::Block;
 
 /// An iterator over the bits of a bit vector.
 pub type Iter<'a> = Take<Flatten<slice::Iter<'a, Block>>>;
@@ -34,8 +37,7 @@ impl BitVec {
 
     /// Returns a new, empty bit vector with at least the specified capacity.
     pub fn with_capacity(cap: usize) -> Self {
-        let cap_blocks = cap.saturating_add(Block::BITS - 1) / Block::BITS;
-        Self { blocks: Vec::with_capacity(cap_blocks), len: 0 }
+        Self { blocks: Vec::with_capacity(div_ceil(cap, Block::BITS)), len: 0 }
     }
 
     /// Returns the total number of bits the bit vector can hold without reallocating.
@@ -83,7 +85,7 @@ impl<'a> IntoIterator for &'a BitVec {
 impl FromIterator<bool> for BitVec {
     fn from_iter<Iter: IntoIterator<Item = bool>>(iter: Iter) -> Self {
         let mut iter = iter.into_iter().fuse().peekable();
-        let cap = iter.size_hint().0.saturating_add(Block::BITS - 1) / Block::BITS;
+        let cap = div_ceil(iter.size_hint().0, Block::BITS);
         let (mut blocks, mut len) = (Vec::with_capacity(cap), 0);
 
         while iter.peek().is_some() {

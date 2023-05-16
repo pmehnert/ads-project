@@ -1,10 +1,15 @@
 use std::{fmt, iter::zip, mem};
 
-use crate::bitvec::{block::BitIndex, AlignedBlock, BitVec, Block};
+use crate::{
+    bitvec::{block::BitIndex, AlignedBlock, BitVec, Block},
+    div_ceil,
+};
 
 #[allow(unused)]
 mod config {
     use crate::bitvec::Block;
+
+    pub const MAX_SIZE_BITS: usize = 1 << 44;
 
     pub const L1_SIZE_BITS: usize = 4096;
     pub const L2_SIZE_BITS: usize = 512;
@@ -44,7 +49,7 @@ pub struct L1Data(u128);
 
 impl<'a> FlatPopcount<'a> {
     pub fn new(bitvec: &'a BitVec) -> Self {
-        assert!(bitvec.len() <= (1 << 44));
+        assert!(bitvec.len() <= config::MAX_SIZE_BITS, "only up to 2^44 bits supported");
 
         assert_eq!(AlignedBlock::BLOCKS, config::L2_SIZE_U64);
         let aligned_blocks = bitvec.aligned_blocks();
@@ -70,8 +75,7 @@ impl<'a> FlatPopcount<'a> {
         data.push(L1Data::new(pre_l1_ones, l2_data));
         let total_ones = pre_l1_ones + u64::from(l1_ones);
 
-        let cap = total_ones.saturating_add(config::SELECT_SAMPLE_RATE - 1)
-            / config::SELECT_SAMPLE_RATE;
+        let cap = div_ceil(total_ones as usize, config::SELECT_SAMPLE_RATE as usize);
         let mut one_hints = Vec::with_capacity(cap as usize);
         let mut next_hint = 0;
         for (i, data) in zip(0.., &data) {

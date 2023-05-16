@@ -18,6 +18,8 @@ use crate::{
 
 pub type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
+pub fn div_ceil(lhs: usize, rhs: usize) -> usize { lhs.saturating_add(rhs - 1) / rhs }
+
 pub fn main() -> Result<TestResults> {
     #[inline(never)]
     fn run_timed<T>(f: impl FnOnce() -> T) -> (T, Duration) {
