@@ -9,7 +9,7 @@ use crate::{
 mod config {
     use crate::bitvec::Block;
 
-    pub const MAX_SIZE_BITS: usize = 1 << 44;
+    pub const MAX_SIZE_BITS: usize = 2_usize.pow(44);
 
     pub const L1_SIZE_BITS: usize = 4096;
     pub const L2_SIZE_BITS: usize = 512;
@@ -131,6 +131,48 @@ impl<'a> FlatPopcount<'a> {
     }
 
     pub fn rank0(&self, index: usize) -> u64 { index as u64 - self.rank1(index) }
+
+    pub fn select1(&self, rank: u64) -> usize {
+        if rank >= self.total_ones {
+            select_out_of_bounds_fail(rank, self.total_ones)
+        }
+
+        let hint_index = (rank / config::SELECT_SAMPLE_RATE) as usize;
+        let hint = self.one_hints[hint_index] as usize;
+
+        debug_assert!(self.data[hint].l1_ones() <= rank);
+        let (l1_index, l1_data) = zip(hint.., &self.data[hint..])
+            .take_while(|(_, l1)| l1.l1_ones() <= rank)
+            .last()
+            .unwrap();
+
+        let sub_rank = (rank - l1_data.l1_ones()) as u32;
+        debug_assert!(sub_rank <= u16::MAX.into());
+
+        // todo make sure this is unrolled
+        let (l2_index, l2_ones) = (0..config::L2_PER_L1)
+            .map(|i| (i, u32::from(l1_data.l2_ones(i))))
+            .take_while(|(_, l2)| *l2 <= sub_rank)
+            .last()
+            .unwrap();
+
+        let mut sub_rank = sub_rank - l2_ones;
+        debug_assert!(sub_rank < config::L2_SIZE_BITS as u32);
+
+        let block_index = l1_index * config::L2_PER_L1 + l2_index;
+        let l2_block = self.bitvec.aligned_blocks()[block_index];
+
+        for (i, block) in l2_block.0.iter().enumerate() {
+            let block_ones = block.count_ones();
+            if sub_rank < block_ones {
+                return block_index * config::L2_SIZE_BITS
+                    + i * Block::BITS
+                    + block.select1(sub_rank) as usize;
+            }
+            sub_rank -= block_ones;
+        }
+        unreachable!();
+    }
 }
 
 impl L1Data {
@@ -183,6 +225,17 @@ fn index_out_of_bounds_fail(index: usize, len: usize) -> ! {
     panic!("index out of bounds: the length is {} but the index is {}", len, index)
 }
 
+#[doc(hidden)]
+#[cold]
+#[inline(never)]
+#[track_caller]
+fn select_out_of_bounds_fail(rank: u64, total_ones: u64) -> ! {
+    panic!(
+        "select out of bounds: the bit vector contains {} ones but the rank is {}",
+        total_ones, rank
+    )
+}
+
 #[cfg(test)]
 mod test {
     use std::iter::repeat;
@@ -226,6 +279,18 @@ mod test {
         assert_eq!(9728, rank.rank1(2 * L1_SIZE_BITS + 3 * L2_SIZE_BITS));
         assert_eq!(8512, rank.rank1(2 * L1_SIZE_BITS + 5 * Block::BITS));
         assert_eq!(1527, rank.rank1(1527));
+
+        assert_eq!(0, rank.rank0(0));
+        assert_eq!(0, rank.rank0(2 * L1_SIZE_BITS));
+        assert_eq!(0, rank.rank0(2 * L1_SIZE_BITS + 3 * L2_SIZE_BITS));
+        assert_eq!(0, rank.rank0(2 * L1_SIZE_BITS + 5 * Block::BITS));
+        assert_eq!(0, rank.rank0(1527));
+
+        assert_eq!(0, rank.select1(0));
+        assert_eq!(2 * config::L1_SIZE_BITS, rank.select1(8192));
+        assert_eq!(2 * L1_SIZE_BITS + 3 * L2_SIZE_BITS, rank.select1(9728));
+        assert_eq!(2 * L1_SIZE_BITS + 5 * Block::BITS, rank.select1(8512));
+        assert_eq!(4620, rank.select1(4620));
     }
 
     #[test]
@@ -238,6 +303,12 @@ mod test {
         assert_eq!(0, rank.rank1(2 * L1_SIZE_BITS + 3 * L2_SIZE_BITS));
         assert_eq!(0, rank.rank1(2 * L1_SIZE_BITS + 5 * Block::BITS));
         assert_eq!(0, rank.rank1(1527));
+
+        assert_eq!(0, rank.rank0(0));
+        assert_eq!(8192, rank.rank0(2 * L1_SIZE_BITS));
+        assert_eq!(9728, rank.rank0(2 * L1_SIZE_BITS + 3 * L2_SIZE_BITS));
+        assert_eq!(8512, rank.rank0(2 * L1_SIZE_BITS + 5 * Block::BITS));
+        assert_eq!(1527, rank.rank0(1527));
     }
 
     #[test]
@@ -250,6 +321,18 @@ mod test {
         assert_eq!(9728, rank.rank1(2 * L1_SIZE_BITS + 3 * L2_SIZE_BITS));
         assert_eq!(8512, rank.rank1(2 * L1_SIZE_BITS + 5 * Block::BITS));
         assert_eq!(1527, rank.rank1(1527));
+
+        assert_eq!(0, rank.rank0(0));
+        assert_eq!(0, rank.rank0(2 * L1_SIZE_BITS));
+        assert_eq!(0, rank.rank0(2 * L1_SIZE_BITS + 3 * L2_SIZE_BITS));
+        assert_eq!(0, rank.rank0(2 * L1_SIZE_BITS + 5 * Block::BITS));
+        assert_eq!(0, rank.rank0(1527));
+
+        assert_eq!(0, rank.select1(0));
+        assert_eq!(2 * config::L1_SIZE_BITS, rank.select1(8192));
+        assert_eq!(2 * L1_SIZE_BITS + 3 * L2_SIZE_BITS, rank.select1(9728));
+        assert_eq!(2 * L1_SIZE_BITS + 5 * Block::BITS, rank.select1(8512));
+        assert_eq!(4620, rank.select1(4620));
     }
 
     #[test]
@@ -262,5 +345,17 @@ mod test {
         assert_eq!(3926, rank.rank1(2 * L1_SIZE_BITS + 7 * L2_SIZE_BITS));
         assert_eq!(2838, rank.rank1(2 * L1_SIZE_BITS + 5 * Block::BITS));
         assert_eq!(509, rank.rank1(1527));
+
+        assert_eq!(0, rank.rank0(0));
+        assert_eq!(5461, rank.rank0(2 * L1_SIZE_BITS));
+        assert_eq!(7850, rank.rank0(2 * L1_SIZE_BITS + 7 * L2_SIZE_BITS));
+        assert_eq!(5674, rank.rank0(2 * L1_SIZE_BITS + 5 * Block::BITS));
+        assert_eq!(1018, rank.rank0(1527));
+
+        assert_eq!(0, rank.select1(0));
+        assert_eq!(8193, rank.select1(2731));
+        assert_eq!(11778, rank.select1(3926));
+        assert_eq!(8514, rank.select1(2838));
+        assert_eq!(4173, rank.select1(1391));
     }
 }
