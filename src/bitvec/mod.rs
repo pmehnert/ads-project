@@ -14,7 +14,7 @@ pub use block::Block;
 /// An iterator over the bits of a bit vector.
 pub type Iter<'a> = Take<Flatten<slice::Iter<'a, Block>>>;
 
-/// A contiguous, cache aligned and compact array of bits, short for 'bit vector'.
+/// A contiguous, cache aligned, and compact array of bits, short for 'bit vector'.
 ///
 /// # Invariants
 ///
@@ -34,11 +34,12 @@ impl BitVec {
 
     /// Returns a new, empty bit vector with at least the specified capacity.
     pub fn with_capacity(cap: usize) -> Self {
-        Self { blocks: Vec::with_capacity(cap / Block::BITS as usize), len: 0 }
+        let cap_blocks = cap.saturating_add(Block::BITS - 1) / Block::BITS;
+        Self { blocks: Vec::with_capacity(cap_blocks), len: 0 }
     }
 
     /// Returns the total number of bits the bit vector can hold without reallocating.
-    pub fn capacity(&self) -> usize { self.blocks.capacity() * Block::BITS as usize }
+    pub fn capacity(&self) -> usize { self.blocks.capacity() * Block::BITS }
 
     /// Returns the number of bits in the bit vector.
     pub fn len(&self) -> usize { self.len }
@@ -49,15 +50,15 @@ impl BitVec {
     /// Returns an (inefficient) iterator over the bits of the bit vector.
     pub fn iter(&self) -> Iter<'_> { self.blocks().iter().flatten().take(self.len) }
 
+    /// Returns a slice containing the underlying cache aligned blocks of the bit vector.
+    ///
+    /// The last element may contain unused bits, which are guranteed to be set to `0`.
+    pub fn aligned_blocks(&self) -> &[AlignedBlock] { &self.blocks }
+
     /// Returns a slice containing the underlying blocks of the bit vector.
     ///
     /// The last [`AlignedBlock::BLOCKS`] elements may contain unused bits, which are
     /// guranteed to be set to `0`.
-    pub fn aligned_blocks(&self) -> &[AlignedBlock] { &self.blocks }
-
-    /// Returns a slice containing the underlying cache aligned blocks of the bit vector.
-    ///
-    /// The last element may contain unused bits, which are guranteed to be set to `0`.
     pub fn blocks(&self) -> &[Block] {
         let aligned = self.aligned_blocks();
 
@@ -82,7 +83,7 @@ impl<'a> IntoIterator for &'a BitVec {
 impl FromIterator<bool> for BitVec {
     fn from_iter<Iter: IntoIterator<Item = bool>>(iter: Iter) -> Self {
         let mut iter = iter.into_iter().fuse().peekable();
-        let cap = (iter.size_hint().0 + Block::BITS as usize - 1) / Block::BITS as usize;
+        let cap = iter.size_hint().0.saturating_add(Block::BITS - 1) / Block::BITS;
         let (mut blocks, mut len) = (Vec::with_capacity(cap), 0);
 
         while iter.peek().is_some() {

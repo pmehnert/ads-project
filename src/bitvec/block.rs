@@ -2,7 +2,7 @@
 
 use std::{fmt, iter::FusedIterator, ops::Range};
 
-/// An integer in the range of `0..63`.
+/// An integer in the range of `0..64`, used to index [`Block`]s.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(transparent)]
 pub struct BitIndex(#[doc(hidden)] pub(super) u8);
@@ -15,9 +15,7 @@ impl BitIndex {
     pub const MAX: Self = Self(Block::BITS as u8 - 1);
     pub const MIN: Self = Self(0);
 
-    pub fn new(index: usize) -> BitIndex {
-        BitIndex((index % Block::BITS as usize) as u8)
-    }
+    pub fn new(index: usize) -> BitIndex { BitIndex((index % Block::BITS) as u8) }
 
     /// Returns a mask with the bit at position `self.0` set to `1`.
     pub fn mask_bit(self) -> u64 { 1 << self.0 }
@@ -33,7 +31,7 @@ pub struct AlignedBlock(pub [Block; Self::BLOCKS]);
 
 impl AlignedBlock {
     /// The total number of bits in `Self`.
-    pub const BITS: usize = Self::BLOCKS * Block::BITS as usize;
+    pub const BITS: usize = Self::BLOCKS * Block::BITS;
     /// The number of [`Block`]s in `Self`.
     pub const BLOCKS: usize = 8;
 }
@@ -51,7 +49,7 @@ impl Block {
     /// A block with all bits set to `1`.
     pub const ALL_ZEROS: Self = Self(0);
     /// The number of bits in a block.
-    pub const BITS: u32 = u64::BITS;
+    pub const BITS: usize = u64::BITS as usize;
 
     /// Returns the bit as `index` in the block.
     pub fn get(&self, index: BitIndex) -> bool { self.0 & index.mask_bit() != 0 }
@@ -59,11 +57,11 @@ impl Block {
     /// Returns an iterator over the bits of this block.
     pub fn iter(&self) -> Iter<'_> { Iter { block: self, range: 0..Self::BITS as u8 } }
 
-    /// Returns the number of `0`-bits in the block.
-    pub fn count_zeroes(self) -> u32 { self.0.count_zeros() }
-
     /// Returns the number of `1`-bits in the block.
     pub fn count_ones(self) -> u32 { self.0.count_ones() }
+
+    /// Returns the number of `0`-bits in the block.
+    pub fn count_zeroes(self) -> u32 { self.0.count_zeros() }
 
     /// Returns the number of `1`-bits up to, and including position `index`.
     pub fn rank1_inclusive(self, index: BitIndex) -> u32 {
@@ -83,12 +81,12 @@ impl Block {
 
     /// Returns `select1(self, rank)`, or `None` if there is no `1`-bit with the given `1`-rank.
     pub fn checked_select1(self, rank: u32) -> Option<u32> {
-        Some(self.select1(rank)).filter(|i| *i < Self::BITS)
+        Some(self.select1(rank)).filter(|i| *i < Self::BITS as u32)
     }
 
     /// Returns `select0(self, rank)`, or `None` if there is no `0`-bit with the given `0`-rank.
     pub fn checked_select0(self, rank: u32) -> Option<u32> {
-        Some(self.select0(rank)).filter(|i| *i < Self::BITS)
+        Some(self.select0(rank)).filter(|i| *i < Self::BITS as u32)
     }
 
     #[doc(hidden)]
@@ -102,7 +100,7 @@ impl Block {
                 return i;
             }
         }
-        Self::BITS
+        Self::BITS as u32
     }
 
     #[doc(hidden)]
@@ -110,8 +108,12 @@ impl Block {
     fn select_impl(self, rank: u32) -> u32 {
         use std::arch::x86_64::*;
 
-        // 'deposit' a `1` into the `rank`-th 1-bit of `self`
+        // Deposit a `1` into the `rank`-th 1-bit of `self` and set everything
+        // else to `0`. Then return the index of that `1`.
+
         let i = 1_u64 << u64::from(rank);
+
+        // Safety: The cfg attriute guarantees that "bmi2" is available.
         let d = unsafe { _pdep_u64(i, self.0) };
         d.trailing_zeros()
     }

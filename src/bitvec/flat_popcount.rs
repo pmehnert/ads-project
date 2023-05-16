@@ -1,7 +1,6 @@
 use std::{fmt, mem};
 
-use super::BitVec;
-use crate::bitvec::{block::BitIndex, AlignedBlock, Block};
+use crate::bitvec::{block::BitIndex, AlignedBlock, BitVec, Block};
 
 #[allow(unused)]
 mod config {
@@ -11,8 +10,8 @@ mod config {
     pub const L2_SIZE_BITS: usize = 512;
 
     pub const L2_PER_L1: usize = L1_SIZE_BITS / L2_SIZE_BITS;
-    pub const L1_SIZE_U64: usize = L1_SIZE_BITS / Block::BITS as usize;
-    pub const L2_SIZE_U64: usize = L2_SIZE_BITS / Block::BITS as usize;
+    pub const L1_SIZE_U64: usize = L1_SIZE_BITS / Block::BITS;
+    pub const L2_SIZE_U64: usize = L2_SIZE_BITS / Block::BITS;
 }
 
 #[derive(Debug, Clone)]
@@ -93,8 +92,8 @@ impl<'a> FlatPopcount<'a> {
         let aligned_index = index / config::L2_SIZE_BITS;
         let l2_block = &self.bitvec.aligned_blocks()[aligned_index].0;
 
-        let block_index = sub_index / Block::BITS as usize;
-        let sub_index = sub_index % Block::BITS as usize;
+        let block_index = sub_index / Block::BITS;
+        let sub_index = sub_index % Block::BITS;
 
         for block in &l2_block[..block_index] {
             rank += u64::from(block.count_ones())
@@ -184,7 +183,7 @@ mod test {
     #[test]
     fn test_rank_select_empty() {
         let bitvec = BitVec::new();
-        let rank = FlatPopcount::new(&bitvec);
+        let _rank = FlatPopcount::new(&bitvec);
     }
 
     #[test]
@@ -195,7 +194,7 @@ mod test {
         assert_eq!(0, rank.rank1(0));
         assert_eq!(8192, rank.rank1(2 * L1_SIZE_BITS));
         assert_eq!(9728, rank.rank1(2 * L1_SIZE_BITS + 3 * L2_SIZE_BITS));
-        assert_eq!(8512, rank.rank1(2 * L1_SIZE_BITS + 5 * Block::BITS as usize));
+        assert_eq!(8512, rank.rank1(2 * L1_SIZE_BITS + 5 * Block::BITS));
         assert_eq!(1527, rank.rank1(1527));
     }
 
@@ -207,7 +206,7 @@ mod test {
         assert_eq!(0, rank.rank1(0));
         assert_eq!(0, rank.rank1(2 * L1_SIZE_BITS));
         assert_eq!(0, rank.rank1(2 * L1_SIZE_BITS + 3 * L2_SIZE_BITS));
-        assert_eq!(0, rank.rank1(2 * L1_SIZE_BITS + 5 * Block::BITS as usize));
+        assert_eq!(0, rank.rank1(2 * L1_SIZE_BITS + 5 * Block::BITS));
         assert_eq!(0, rank.rank1(1527));
     }
 
@@ -219,7 +218,7 @@ mod test {
         assert_eq!(0, rank.rank1(0));
         assert_eq!(8192, rank.rank1(2 * L1_SIZE_BITS));
         assert_eq!(9728, rank.rank1(2 * L1_SIZE_BITS + 3 * L2_SIZE_BITS));
-        assert_eq!(8512, rank.rank1(2 * L1_SIZE_BITS + 5 * Block::BITS as usize));
+        assert_eq!(8512, rank.rank1(2 * L1_SIZE_BITS + 5 * Block::BITS));
         assert_eq!(1527, rank.rank1(1527));
     }
 
@@ -231,7 +230,7 @@ mod test {
         assert_eq!(0, rank.rank1(0));
         assert_eq!(2731, rank.rank1(2 * L1_SIZE_BITS));
         assert_eq!(3926, rank.rank1(2 * L1_SIZE_BITS + 7 * L2_SIZE_BITS));
-        assert_eq!(2838, rank.rank1(2 * L1_SIZE_BITS + 5 * Block::BITS as usize));
+        assert_eq!(2838, rank.rank1(2 * L1_SIZE_BITS + 5 * Block::BITS));
         assert_eq!(509, rank.rank1(1527));
     }
 }
