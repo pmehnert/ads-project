@@ -1,12 +1,15 @@
-use std::{fmt, iter::zip, mem};
+//! An implementation of _flat-popcount_ for rank and select queries on bit vectors.
+
+use std::{borrow::Borrow, fmt, iter::zip, mem};
 
 use crate::{
     bitvec::{block::BitIndex, AlignedBlock, BitVec, Block},
     div_ceil,
 };
 
+/// Todo
 #[allow(unused)]
-mod config {
+pub mod config {
     use crate::bitvec::Block;
 
     pub const MAX_SIZE_BITS: usize = 2_usize.pow(44);
@@ -21,44 +24,70 @@ mod config {
     pub const SELECT_SAMPLE_RATE: u64 = 8192;
 }
 
-#[derive(Debug, Clone)]
-pub struct FlatPopcount<'a> {
-    bitvec: &'a BitVec,
-    data: Vec<L1Data>,
+/// An implementation of _flat-popcount_ \[1\] for rank and select queries on bit vectors.
+///
+/// The bit vector is partitioned into two layers of blocks --- L2 blocks spanning
+/// 512 bits and L1 blocks spanning 4096 bits respectively. For each block the number
+/// of `1`-bits, from the start of the bit vector, or surrounding L1 block, is
+/// precomputed and stored. The counts are stored in an interleaved, cache-friendly
+/// format (see [`L1L2Data`]). Note that the L0 blocks described in \[1\] are omitted.
+/// Thus, only bit vectors with up to `2^44` bits are supported.
+///
+/// To speed up select queries, the L1 position of every `8192`th `1`-bit is stored
+///
+/// # References
+///
+/// \[1\] Florian Kurpicz. _Engineering Compact Data Structures for Rank and
+/// Select Queries on Bit Vectors_. DOI: [10.48550/arXiv.2206.01149]
+///
+/// [10.48550/arXiv.2206.01149]: https://doi.org/10.48550/arXiv.2206.01149
+#[derive(Debug, Default, Clone)]
+pub struct FlatPopcount<Bits: Borrow<BitVec>> {
+    bitvec: Bits,
+    data: Vec<L1L2Data>,
     one_hints: Vec<u32>,
     total_ones: u64,
 }
 
-/// # Layout
-///
-/// Using ZIGs wonderful integer types, the struct could be defined as follows:
+/// The space efficient, interleaved L1 and L2 indeces of flat-popcount.
 ///
 /// TODO
-/// ```zig
+///
+/// # Layout
+///
+/// The type is guaranteed to have a size and alignment of 128 bit. Using [Zig]s
+/// wonderful integer types, the struct's members could be defined as follows:
+///
+/// ```
 /// const L1Data = packed struct {
 ///     l1_ones: u44,
-///     l2_ones: packed struct
-///     l2_1: u12,
-///     // l2_2, ..., l2_6
-///     l2_7: u12,
+///     l2_ones: packed struct {
+///         l2_1: u12, l2_2: u12, l2_3: u12, l2_4: u12,  
+///         l2_5: u12, l2_6: u12, l2_7: u12
+///     }
 /// }
 /// ```
+///
+/// [Zig]: https://ziglang.org/
 #[derive(Default, Clone, Copy)]
 #[repr(C, align(16))]
-pub struct L1Data(u128);
+pub struct L1L2Data(#[doc(hidden)] u128);
 
-impl<'a> FlatPopcount<'a> {
-    pub fn new(bitvec: &'a BitVec) -> Self {
-        assert!(bitvec.len() <= config::MAX_SIZE_BITS, "only up to 2^44 bits supported");
+impl<Bits: Borrow<BitVec>> FlatPopcount<Bits> {
+    pub fn new(bitvec: Bits) -> Self {
+        assert!(
+            bitvec.borrow().len() <= config::MAX_SIZE_BITS,
+            "only up to 2^44 bits supported"
+        );
 
         assert_eq!(AlignedBlock::BLOCKS, config::L2_SIZE_U64);
-        let aligned_blocks = bitvec.aligned_blocks();
+        let aligned_blocks = bitvec.borrow().aligned_blocks();
         let mut data = Vec::with_capacity(aligned_blocks.len());
 
         let (mut pre_l1_ones, mut l1_ones, mut l2_data) = (0u64, 0u32, [0u16; 7]);
         for (i, chunk) in aligned_blocks.iter().enumerate() {
             if i != 0 && i % config::L2_PER_L1 == 0 {
-                data.push(L1Data::new(pre_l1_ones, mem::take(&mut l2_data)));
+                data.push(L1L2Data::new(pre_l1_ones, mem::take(&mut l2_data)));
                 pre_l1_ones += u64::from(mem::take(&mut l1_ones));
             }
 
@@ -72,11 +101,11 @@ impl<'a> FlatPopcount<'a> {
         if aligned_blocks.len() % config::L2_PER_L1 != 0 {
             l2_data[aligned_blocks.len() % config::L2_PER_L1..].fill(l1_ones as u16);
         }
-        data.push(L1Data::new(pre_l1_ones, l2_data));
+        data.push(L1L2Data::new(pre_l1_ones, l2_data));
         let total_ones = pre_l1_ones + u64::from(l1_ones);
 
         let cap = div_ceil(total_ones as usize, config::SELECT_SAMPLE_RATE as usize);
-        let mut one_hints = Vec::with_capacity(cap as usize);
+        let mut one_hints = Vec::with_capacity(cap);
         let mut next_hint = 0;
         for (i, data) in zip(0.., &data) {
             if data.l1_ones() >= next_hint {
@@ -88,9 +117,20 @@ impl<'a> FlatPopcount<'a> {
         Self { bitvec, data, one_hints, total_ones }
     }
 
+    /// Returns the number of `1`-bits up to and not including the given index.
+    ///
+    /// # Algorithm
+    ///
+    /// TODO
+    ///
+    /// 1. Look up the number of ones that occur
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index` is out of bounds for `self.bitvec`.
     pub fn rank1(&self, index: usize) -> u64 {
-        if index >= self.bitvec.len() {
-            index_out_of_bounds_fail(index, self.bitvec.len());
+        if index >= self.bitvec().len() {
+            index_out_of_bounds_fail(index, self.bitvec().len());
         }
 
         let l1_index = index / config::L1_SIZE_BITS;
@@ -112,7 +152,7 @@ impl<'a> FlatPopcount<'a> {
         }
 
         let aligned_index = index / config::L2_SIZE_BITS;
-        let l2_block = &self.bitvec.aligned_blocks()[aligned_index].0;
+        let l2_block = &self.bitvec().aligned_blocks()[aligned_index].0;
 
         let block_index = sub_index / Block::BITS;
         let sub_index = sub_index % Block::BITS;
@@ -130,6 +170,15 @@ impl<'a> FlatPopcount<'a> {
         rank
     }
 
+    /// Returns the number of `0`-bits up to and not including the given index.
+    ///
+    /// See [`rank1`] for a detailed description of the algorithm.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index` is out of bounds for `self.bitvec`.
+    ///
+    /// [`rank1`]: Self::rank1
     pub fn rank0(&self, index: usize) -> u64 { index as u64 - self.rank1(index) }
 
     pub fn select1(&self, rank: u64) -> usize {
@@ -150,6 +199,7 @@ impl<'a> FlatPopcount<'a> {
         debug_assert!(sub_rank <= u16::MAX.into());
 
         // todo make sure this is unrolled
+        // todo binary search
         let (l2_index, l2_ones) = (0..config::L2_PER_L1)
             .map(|i| (i, u32::from(l1_data.l2_ones(i))))
             .take_while(|(_, l2)| *l2 <= sub_rank)
@@ -160,7 +210,7 @@ impl<'a> FlatPopcount<'a> {
         debug_assert!(sub_rank < config::L2_SIZE_BITS as u32);
 
         let block_index = l1_index * config::L2_PER_L1 + l2_index;
-        let l2_block = self.bitvec.aligned_blocks()[block_index];
+        let l2_block = self.bitvec().aligned_blocks()[block_index];
 
         for (i, block) in l2_block.0.iter().enumerate() {
             let block_ones = block.count_ones();
@@ -173,10 +223,14 @@ impl<'a> FlatPopcount<'a> {
         }
         unreachable!();
     }
+
+    fn bitvec(&self) -> &BitVec { self.bitvec.borrow() }
 }
 
-impl L1Data {
+impl L1L2Data {
+    #[doc(hidden)]
     const U12_MASK: u128 = 0b1111_1111_1111;
+    #[doc(hidden)]
     const U44_MASK: u128 = 0xFFF_FFFF_FFFF;
 
     #[allow(clippy::erasing_op, clippy::identity_op)]
@@ -194,10 +248,12 @@ impl L1Data {
         )
     }
 
+    /// Returns the number of `1`-bits up to the beginning of the L1-block.
     pub fn l1_ones(self) -> u64 { (Self::U44_MASK & self.0) as u64 }
 
     // todo the general case here is terrible
     // todo what about out of bounds
+    /// Returns the number of `1`-bits from the beginning of the L1-block up to the given L2-block.
     pub fn l2_ones(self, index: usize) -> u16 {
         if index > 0 {
             (Self::U12_MASK & (self.0 >> (index * 12 + 44 - 12))) as u16
@@ -207,7 +263,7 @@ impl L1Data {
     }
 }
 
-impl fmt::Debug for L1Data {
+impl fmt::Debug for L1L2Data {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let l2_ones: [_; 8] = std::array::from_fn(|i| self.l2_ones(i));
         f.debug_struct("L1Data")
@@ -245,13 +301,13 @@ mod test {
 
     #[test]
     fn test_l1l2_layout() {
-        assert_eq!(16, std::mem::size_of::<L1Data>());
-        assert_eq!(16, std::mem::align_of::<L1Data>());
+        assert_eq!(16, std::mem::size_of::<L1L2Data>());
+        assert_eq!(16, std::mem::align_of::<L1L2Data>());
     }
 
     #[test]
     fn test_l1l2_construction() {
-        let data = L1Data::new(42, [1, 2, 3, 4, 5, 6, 4095]);
+        let data = L1L2Data::new(42, [1, 2, 3, 4, 5, 6, 4095]);
         assert_eq!(42, data.l1_ones());
         assert_eq!(0, data.l2_ones(0));
         assert_eq!(1, data.l2_ones(1));
