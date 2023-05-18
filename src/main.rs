@@ -7,13 +7,14 @@ use std::{
     error::Error,
     fmt, fs,
     io::{self, Write},
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::{ExitCode, Termination},
     time::{Duration, Instant},
 };
 
 use crate::{
     int::IndexInt,
+    predecessor::EliasFano,
     rmq::{fits_index, Naive, RangeMinimum},
 };
 
@@ -30,7 +31,13 @@ pub fn main() -> Result<TestResults> {
         (result, elapsed)
     }
 
-    fn run_pd(_input: PredecessorInput) -> (Vec<usize>, usize) { todo!() }
+    fn run_pd(input: PredecessorInput) -> (Vec<u64>, usize) {
+        let pd = EliasFano::new(&input.values);
+
+        let result = input.queries.iter().map(|value| pd.predecessor(*value)).collect();
+
+        (result, pd.size_bits())
+    }
 
     fn run_rmq(input: RMQInput) -> (Vec<usize>, usize) {
         // todo do all three implementations need to be run here?
@@ -51,28 +58,31 @@ pub fn main() -> Result<TestResults> {
         (result, rmq.size_bits())
     }
 
+    fn write_results(out_path: &Path, results: Vec<impl fmt::Display>) -> Result<()> {
+        let mut out_file =
+            fs::OpenOptions::new().write(true).create(true).open(out_path)?;
+        results.iter().try_for_each(|x| writeln!(out_file, "{}", x))?;
+        Ok(())
+    }
+
     let args = Arguments::parse()?;
     let input_file = fs::OpenOptions::new().read(true).open(args.in_path)?;
     let input_reader = io::BufReader::new(input_file);
 
-    let ((output, space), time) = match args.algo {
+    let (space, time) = match args.algo {
         Algorithm::Predecessor => {
             let input = PredecessorInput::parse(input_reader)?;
-            run_timed(|| run_pd(input))
+            let ((results, space), time) = run_timed(|| run_pd(input));
+            write_results(&args.out_path, results)?;
+            (space, time)
         },
         Algorithm::RangeMinimumQuery => {
             let input = RMQInput::parse(input_reader)?;
-            run_timed(|| run_rmq(input))
+            let ((results, space), time) = run_timed(|| run_rmq(input));
+            write_results(&args.out_path, results)?;
+            (space, time)
         },
     };
-
-    let mut out_file = fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        // todo .truncate(true) ?
-        .open(&args.out_path)?;
-
-    output.iter().try_for_each(|x| writeln!(out_file, "{}", x))?;
 
     Ok(TestResults { algo: args.algo, time, space })
 }
@@ -124,7 +134,7 @@ impl Termination for TestResults {
         // todo check output specification (equal sign after name)
         let _ = writeln!(
             std::io::stderr(),
-            "RESULT algo={} name=pascal_mehnert time={} space={}",
+            "RESULT algo={} namepascal_mehnert time={} space={}",
             self.algo,
             self.time.as_millis(),
             self.space,

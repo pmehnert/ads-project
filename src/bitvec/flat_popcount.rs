@@ -115,8 +115,9 @@ impl<Bits: Borrow<BitVec>> FlatPopcount<Bits> {
         assert_eq!(AlignedBlock::BLOCKS, config::L2_SIZE_U64);
         let aligned_blocks = bitvec.borrow().aligned_blocks();
         let l1_count = div_ceil(aligned_blocks.len(), config::L2_PER_L1);
-        let mut data = Vec::with_capacity(l1_count);
 
+        // Unfourtunately, Rust is not emitting an alloc_zeroed here
+        let mut data = Vec::with_capacity(l1_count);
         let mut l1_blocks = aligned_blocks.chunks_exact(config::L2_PER_L1);
         data.resize(l1_blocks.len(), Default::default());
 

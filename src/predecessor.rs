@@ -17,6 +17,7 @@ pub struct EliasFano {
 }
 
 impl EliasFano {
+    // todo change this to accept an iterator?
     pub fn new(values: &[u64]) -> Self {
         let max = match values.last() {
             Some(last) => last,
@@ -46,6 +47,10 @@ impl EliasFano {
 
         Self { upper_half, lower_half, lower_bits, lower_bytes }
     }
+
+    pub fn size_bits(&self) -> usize { todo!() }
+
+    pub fn predecessor(&self, _value: u64) -> u64 { todo!() }
 }
 
 struct EliasFanoUpperIter<'a> {
