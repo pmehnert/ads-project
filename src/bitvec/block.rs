@@ -74,20 +74,13 @@ impl Block {
     }
 
     /// Returns the index of the first `1`-bit with the given `1`-rank.
+    ///
+    /// On x86 CPUs with the BMI2 extension, this is accelerated using
+    /// the PDEP instruction.
     pub fn select1(self, rank: u32) -> u32 { self.select_impl(rank) }
 
     /// Returns the index of the first `0`-bit with the given `0`-rank.
     pub fn select0(self, rank: u32) -> u32 { Block(!self.0).select_impl(rank) }
-
-    /// Returns `select1(self, rank)`, or `None` if there is no `1`-bit with the given `1`-rank.
-    pub fn checked_select1(self, rank: u32) -> Option<u32> {
-        Some(self.select1(rank)).filter(|i| *i < Self::BITS as u32)
-    }
-
-    /// Returns `select0(self, rank)`, or `None` if there is no `0`-bit with the given `0`-rank.
-    pub fn checked_select0(self, rank: u32) -> Option<u32> {
-        Some(self.select0(rank)).filter(|i| *i < Self::BITS as u32)
-    }
 
     #[doc(hidden)]
     #[cfg(not(all(target_arch = "x86_64", target_feature = "bmi2")))]

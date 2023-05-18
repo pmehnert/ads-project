@@ -49,6 +49,9 @@ impl BitVec {
     /// Returns `true` if the bit vector contains no bits.
     pub fn is_empty(&self) -> bool { self.len == 0 }
 
+    /// Estimates the bit vector's allocation size in bits.
+    pub fn size_bits(&self) -> usize { self.blocks.len() * AlignedBlock::BITS }
+
     /// Returns an (inefficient) iterator over the bits of the bit vector.
     pub fn iter(&self) -> Iter<'_> { self.blocks().iter().flatten().take(self.len) }
 
