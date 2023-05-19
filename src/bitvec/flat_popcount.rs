@@ -2,12 +2,9 @@
 
 use std::{borrow::Borrow, fmt, iter::zip};
 
-use crate::{
-    bitvec::{block::BitIndex, AlignedBlock, BitVec, Block},
-    div_ceil,
-};
+use crate::bitvec::{block::BitIndex, AlignedBlock, BitVec, Block};
 
-/// Various static haracteristic values of the flat-popcount data structure.
+/// Various static characteristic values of the flat-popcount data structure.
 #[allow(unused)]
 pub mod config {
     use crate::bitvec::Block;
@@ -44,8 +41,8 @@ pub type Hint = u32;
 /// format (see [`L1L2Data`]). Note that the L0 blocks described in \[1\] are omitted.
 /// Thus, only bit vectors with up to `2^44` bits are supported.
 ///
-/// To speed up select queries, the L1 block of every `8192`th `1`-bit is stored
-/// explicitly.
+/// To speed up select queries, the L1 block of every `8192`th `1`- and `0`-bit
+/// is stored explicitly.
 ///
 /// # References
 ///
@@ -58,7 +55,9 @@ pub struct FlatPopcount<Bits: Borrow<BitVec>> {
     bitvec: Bits,
     data: Vec<L1L2Data>,
     one_hints: Vec<Hint>,
+    zero_hints: Vec<Hint>,
     total_ones: u64,
+    total_zeros: u64,
 }
 
 /// The space efficient, interleaved L1 and L2 indeces of flat-popcount.
@@ -96,7 +95,7 @@ impl<Bits: Borrow<BitVec>> FlatPopcount<Bits> {
     /// 1. Scan the bit vector's blocks and count the number of ones in each.
     /// Directly create [`L1L2Data`] for all L1 and L2 blocks.
     /// 2. Scan the just created L1 data and store the L1 index of every `8192`th
-    /// `1`-bit.
+    /// `1`- and `0`-bit.
     ///
     /// # Panics
     ///
@@ -114,7 +113,7 @@ impl<Bits: Borrow<BitVec>> FlatPopcount<Bits> {
 
         assert_eq!(AlignedBlock::BLOCKS, config::L2_SIZE_U64);
         let aligned_blocks = bitvec.borrow().aligned_blocks();
-        let l1_count = div_ceil(aligned_blocks.len(), config::L2_PER_L1);
+        let l1_count = crate::div_ceil(aligned_blocks.len(), config::L2_PER_L1);
 
         // Unfourtunately, Rust is not emitting an alloc_zeroed here
         let mut data = Vec::with_capacity(l1_count);
@@ -152,24 +151,39 @@ impl<Bits: Borrow<BitVec>> FlatPopcount<Bits> {
             total_ones += u64::from(l1_ones);
         }
 
-        // Derive number of required one hints and write them out
-        let cap = div_ceil(total_ones as usize, config::SELECT_SAMPLE_RATE as usize);
-        let mut one_hints = Vec::with_capacity(cap);
-        let mut next_hint = 0;
-        for (i, data) in zip(0.., &data) {
-            if data.l1_ones() >= next_hint {
-                next_hint += config::SELECT_SAMPLE_RATE;
+        // Derive number of required one/zero hints and write them out
+        let mut one_hints = Vec::with_capacity(crate::div_ceil(
+            total_ones as usize,
+            config::SELECT_SAMPLE_RATE as usize,
+        ));
+        let mut zero_hints = Vec::with_capacity(crate::div_ceil(
+            (aligned_blocks.len() * AlignedBlock::BITS) - total_ones as usize,
+            config::SELECT_SAMPLE_RATE as usize,
+        ));
+        let (mut next_one_hint, mut next_zero_hint) = (0, 0);
+
+        for (i, data) in zip(0u32.., &data) {
+            let l1_ones = data.l1_ones();
+            let l1_zeros = u64::from(i) * config::L1_SIZE_BITS as u64 - l1_ones;
+            if l1_ones >= next_one_hint {
+                next_one_hint += config::SELECT_SAMPLE_RATE;
                 one_hints.push(i);
+            }
+            if l1_zeros >= next_zero_hint {
+                next_zero_hint += config::SELECT_SAMPLE_RATE;
+                zero_hints.push(i);
             }
         }
 
-        Self { bitvec, data, one_hints, total_ones }
+        let total_zeros = bitvec.borrow().len() as u64 - total_ones;
+        Self { bitvec, data, one_hints, zero_hints, total_ones, total_zeros }
     }
 
     /// Estimates the allocation size of the flat-popcount data structure in bits.
     pub fn size_bits(&self) -> usize {
         self.data.len() * std::mem::size_of::<L1L2Data>() * 8
             + self.one_hints.len() * std::mem::size_of::<Hint>() * 8
+            + self.zero_hints.len() * std::mem::size_of::<Hint>() * 8
     }
 
     /// Returns a reference to the underlying bit vector.
@@ -179,7 +193,7 @@ impl<Bits: Borrow<BitVec>> FlatPopcount<Bits> {
     pub fn count_ones(&self) -> u64 { self.total_ones }
 
     /// Returns the number of `0`-bits in the bit vector.
-    pub fn count_zeros(&self) -> u64 { self.bitvec().len() as u64 - self.count_ones() }
+    pub fn count_zeros(&self) -> u64 { self.total_zeros }
 
     /// Returns the number of `1`-bits up to and not including the given index.
     ///
@@ -217,7 +231,6 @@ impl<Bits: Borrow<BitVec>> FlatPopcount<Bits> {
         let l2_index = sub_index / config::L2_SIZE_BITS;
         let sub_index = sub_index % config::L2_SIZE_BITS;
 
-        // todo maybe inline this manually
         rank += u64::from(l1_data.l2_ones(l2_index));
         if sub_index == 0 {
             return rank;
@@ -266,44 +279,83 @@ impl<Bits: Borrow<BitVec>> FlatPopcount<Bits> {
     ///
     /// Panics if the bit vector does not contain more than `rank` `1`-bits.
     pub fn select1(&self, rank: u64) -> usize {
-        if rank >= self.total_ones {
-            select_out_of_bounds_fail(rank, self.total_ones)
+        if rank < self.total_ones {
+            let hint_index = (rank / config::SELECT_SAMPLE_RATE) as usize;
+            let hint = self.one_hints[hint_index] as usize;
+
+            self.select_b(rank, hint, |ones, _| ones, Block::select1)
+        } else {
+            select_out_of_bounds_fail(rank, self.total_ones, true)
         }
+    }
 
-        let hint_index = (rank / config::SELECT_SAMPLE_RATE) as usize;
-        let hint = self.one_hints[hint_index] as usize;
+    /// Returns the index of the first `0`-bit with the given rank, i.e. the
+    /// `rank`th `0`-bit (see also [`select1`](Self::select1)).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the bit vector does not contain more than `rank` `0`-bits.
+    pub fn select0(&self, rank: u64) -> usize {
+        if rank < self.total_zeros {
+            let hint_index = (rank / config::SELECT_SAMPLE_RATE) as usize;
+            let hint = self.zero_hints[hint_index] as usize;
 
+            self.select_b(rank, hint, |ones, idx| idx as u64 - ones, Block::select0)
+        } else {
+            select_out_of_bounds_fail(rank, self.total_zeros, false)
+        }
+    }
+
+    /// Internal generic implementation of select for `b`-bits.
+    ///
+    /// Given a positon and the number of `1`-bits up to it, `rank_b` must return
+    /// the number of `b`-bits up to that position. Given a block of bits and a
+    /// rank `n`, `select_b` must return the `n`th `b`-bit.
+    fn select_b(
+        &self,
+        rank: u64,
+        hint: usize,
+        mut rank_b: impl FnMut(u64, usize) -> u64,
+        mut select_b: impl FnMut(Block, u32) -> u32,
+    ) -> usize {
         debug_assert!(self.data[hint].l1_ones() <= rank);
         let (l1_index, l1_data) = zip(hint.., &self.data[hint..])
-            .take_while(|(_, l1)| l1.l1_ones() <= rank)
+            .take_while(|(i, l1_data)| {
+                let l1_bits = i * config::L1_SIZE_BITS;
+                let l1_rank = rank_b(l1_data.l1_ones(), l1_bits);
+                l1_rank <= rank
+            })
             .last()
             .unwrap();
 
-        let sub_rank = (rank - l1_data.l1_ones()) as u32;
+        let l1_rank = rank_b(l1_data.l1_ones(), l1_index * config::L1_SIZE_BITS);
+        let sub_rank = rank - l1_rank;
         debug_assert!(sub_rank <= u16::MAX.into());
 
-        // todo make sure this is unrolled
-        // todo binary search
         let (l2_index, l2_ones) = (0..config::L2_PER_L1)
-            .map(|i| (i, u32::from(l1_data.l2_ones(i))))
-            .take_while(|(_, l2)| *l2 <= sub_rank)
+            .map(|i| {
+                let l2_bits = i * config::L2_SIZE_BITS;
+                let l2_ones = l1_data.l2_ones(i);
+                (i, rank_b(l2_ones.into(), l2_bits))
+            })
+            .take_while(|(_, l2_rank)| *l2_rank <= sub_rank)
             .last()
             .unwrap();
 
         let mut sub_rank = sub_rank - l2_ones;
-        debug_assert!(sub_rank < config::L2_SIZE_BITS as u32);
+        debug_assert!(sub_rank < config::L2_SIZE_BITS as u64);
 
         let block_index = l1_index * config::L2_PER_L1 + l2_index;
         let l2_block = self.bitvec().aligned_blocks()[block_index];
 
         for (i, block) in l2_block.0.iter().enumerate() {
-            let block_ones = block.count_ones();
-            if sub_rank < block_ones {
+            let block_rank = rank_b(block.count_ones().into(), Block::BITS);
+            if sub_rank < block_rank {
                 return block_index * config::L2_SIZE_BITS
                     + i * Block::BITS
-                    + block.select1(sub_rank) as usize;
+                    + select_b(*block, sub_rank as u32) as usize;
             }
-            sub_rank -= block_ones;
+            sub_rank -= block_rank;
         }
         unreachable!();
     }
@@ -315,7 +367,9 @@ impl L1L2Data {
     #[doc(hidden)]
     const U44_MASK: u128 = 0xFFF_FFFF_FFFF;
 
-    /// TODO
+    /// Constructs the interleaved index using the given `1`-bit counts.
+    ///
+    /// Any bits that exceed the range of a `u44` or `u12` respectively are masked.
     #[allow(clippy::erasing_op, clippy::identity_op)]
     pub fn new(l1_ones: u64, l2_ones: &[u16; 7]) -> Self {
         let [l2_1, l2_2, l2_3, l2_4, l2_5, l2_6, l2_7] = l2_ones;
@@ -368,10 +422,10 @@ fn index_out_of_bounds_fail(index: usize, len: usize) -> ! {
 #[cold]
 #[inline(never)]
 #[track_caller]
-fn select_out_of_bounds_fail(rank: u64, total_ones: u64) -> ! {
+fn select_out_of_bounds_fail(rank: u64, total_ones: u64, value: bool) -> ! {
     panic!(
-        "select out of bounds: the bit vector contains {} ones but the rank is {}",
-        total_ones, rank
+        "select out of bounds: the bit vector contains {} {}-bits but the rank is {}",
+        total_ones, value as u8, rank
     )
 }
 
@@ -448,6 +502,12 @@ mod test {
         assert_eq!(9728, rank.rank0(2 * L1_SIZE_BITS + 3 * L2_SIZE_BITS));
         assert_eq!(8512, rank.rank0(2 * L1_SIZE_BITS + 5 * Block::BITS));
         assert_eq!(1527, rank.rank0(1527));
+
+        assert_eq!(0, rank.select0(0));
+        assert_eq!(2 * config::L1_SIZE_BITS, rank.select0(8192));
+        assert_eq!(2 * L1_SIZE_BITS + 3 * L2_SIZE_BITS, rank.select0(9728));
+        assert_eq!(2 * L1_SIZE_BITS + 5 * Block::BITS, rank.select0(8512));
+        assert_eq!(4620, rank.select0(4620));
     }
 
     #[test]
@@ -496,5 +556,11 @@ mod test {
         assert_eq!(11778, rank.select1(3926));
         assert_eq!(8514, rank.select1(2838));
         assert_eq!(4173, rank.select1(1391));
+
+        assert_eq!(1, rank.select0(0));
+        assert_eq!(4097, rank.select0(2731));
+        assert_eq!(5890, rank.select0(3926));
+        assert_eq!(4258, rank.select0(2838));
+        assert_eq!(2087, rank.select0(1391));
     }
 }
