@@ -1,5 +1,6 @@
 pub mod bitvec;
 pub mod int;
+pub mod packed;
 pub mod predecessor;
 pub mod rmq;
 
