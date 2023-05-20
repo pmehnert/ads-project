@@ -67,7 +67,7 @@ impl<'a, Idx: IndexInt> Naive<'a, Idx> {
     }
 
     /// Returns the size of the allocation in bits.
-    pub fn size_bits(&self) -> usize { 8 * std::mem::size_of::<Idx>() * self.table.len() }
+    pub fn size_bits(&self) -> usize { 8 * std::mem::size_of_val(self.table.as_slice()) }
 }
 
 impl<'a, Idx: IndexInt> RangeMinimum for Naive<'a, Idx> {
@@ -145,7 +145,7 @@ impl<'a, Idx: IndexInt> Sparse<'a, Idx> {
     }
 
     /// Returns the size of the allocation in bits.
-    pub fn size_bits(&self) -> usize { 8 * std::mem::size_of::<Idx>() * self.table.len() }
+    pub fn size_bits(&self) -> usize { 8 * std::mem::size_of_val(self.table.as_slice()) }
 }
 
 impl<'a, Idx: IndexInt> RangeMinimum for Sparse<'a, Idx> {

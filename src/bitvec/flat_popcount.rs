@@ -181,9 +181,9 @@ impl<Bits: Borrow<BitVec>> FlatPopcount<Bits> {
 
     /// Estimates the allocation size of the flat-popcount data structure in bits.
     pub fn size_bits(&self) -> usize {
-        self.data.len() * std::mem::size_of::<L1L2Data>() * 8
-            + self.one_hints.len() * std::mem::size_of::<Hint>() * 8
-            + self.zero_hints.len() * std::mem::size_of::<Hint>() * 8
+        8 * std::mem::size_of_val(self.data.as_slice())
+            + 8 * std::mem::size_of_val(self.one_hints.as_slice())
+            + 8 * std::mem::size_of_val(self.zero_hints.as_slice())
     }
 
     /// Returns a reference to the underlying bit vector.

@@ -43,7 +43,6 @@ impl EliasFano {
     }
 
     pub fn size_bits(&self) -> usize {
-        // todo include size_of(Self) everyhwere
         self.upper_half.size_bits()
             + self.upper_half.bitvec().size_bits()
             + self.lower_half.size_bits()

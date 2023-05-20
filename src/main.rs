@@ -41,16 +41,14 @@ pub fn main() -> Result<TestResults> {
         let result =
             input.queries.iter().map(|value| pd.predecessor(*value).unwrap()).collect();
 
-        (result, pd.size_bits())
+        (result, pd.size_bits() + 8 * std::mem::size_of_val(&pd))
     }
 
     fn run_rmq(input: RMQInput) -> (Vec<usize>, usize) {
         // todo do all three implementations need to be run here?
         match &input.values {
-            // values if fits_index::<u8>(values) => run_rmq_with::<u8>(&input),
             values if fits_index::<u16>(values) => run_rmq_with::<u16>(&input),
             values if fits_index::<u32>(values) => run_rmq_with::<u32>(&input),
-            // values if fits_index::<u64>(values) => run_rmq_with::<u64>(&input),
             _ => run_rmq_with::<usize>(&input),
         }
     }
@@ -60,7 +58,7 @@ pub fn main() -> Result<TestResults> {
         let result = (input.queries.iter())
             .map(|(lower, upper)| rmq.range_min(*lower, *upper).unwrap())
             .collect();
-        (result, rmq.size_bits())
+        (result, rmq.size_bits() + 8 * std::mem::size_of_val(&rmq))
     }
 
     fn write_results(out_path: &Path, results: Vec<impl fmt::Display>) -> Result<()> {
