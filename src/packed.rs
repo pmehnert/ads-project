@@ -1,6 +1,6 @@
 //! A byte packed array of equally sized integers.
 
-use std::{fmt, iter::FusedIterator, iter::StepBy, slice::Windows};
+use std::{fmt, iter, iter::FusedIterator, num, slice};
 
 /// A byte packed array of equally sized integers.
 ///
@@ -12,8 +12,9 @@ use std::{fmt, iter::FusedIterator, iter::StepBy, slice::Windows};
 #[derive(Clone)]
 pub struct PackedArray {
     bytes: Vec<u8>,
-    size_bytes: usize,
-    size_bits: u32,
+    size_bits: num::NonZeroU32,
+    size_bytes: num::NonZeroUsize,
+    mask: u64,
 }
 
 impl PackedArray {
@@ -23,7 +24,6 @@ impl PackedArray {
     /// # Panics
     ///
     /// Panics if `size_bits` is not in `1..=64`.
-    #[inline(never)]
     pub fn new<Values>(size_bits: u32, values: Values) -> Self
     where
         Values: IntoIterator<Item = u64>,
@@ -36,64 +36,70 @@ impl PackedArray {
         );
 
         let values = values.into_iter();
+        let mask = u64::MAX >> (64 - size_bits);
         let size_bytes = crate::div_ceil(size_bits as usize, 8);
-        let excess_bytes = 8 - size_bytes;
-        assert!((1..=8).contains(&size_bytes));
 
         // Allocate enough bytes so that every value can be accessed as the
         // `size_bytes` least significant bytes of a 64-bit integer.
-        let mut bytes = vec![0u8; size_bytes * values.len() + excess_bytes];
+        let len = size_bytes.saturating_mul(values.len());
+        let mut bytes = vec![0u8; len.saturating_add(8 - size_bytes)];
 
-        let write_ne_bytes = |(i, ne_bytes)| {
-            let idx = i * size_bytes;
-
+        let write_ne_bytes = |(idx, ne_bytes)| {
             // Using `get_unchecked` allows the compiler to vectorize this
+            //
+            // Safety: Only called with `idx` from `range` which is guaranteed
+            // to be in bounds for `bytes`.
             let slice = unsafe { bytes.get_unchecked_mut(idx..idx + 8) };
-
             let dst = <&mut [_; 8]>::try_from(slice).unwrap();
             *dst = ne_bytes;
         };
 
-        let mask = u64::MAX >> (64 - size_bits);
-        let iter = values.into_iter().map(|value| u64::to_ne_bytes(value & mask));
+        let range = (0..values.len()).map(|i| i * size_bytes);
+        let iter = values.map(|value| u64::to_ne_bytes(value & mask));
 
         // Write back to front for big endian systems, as to not overwrite
         // previously written bytes
         if cfg!(target_endian = "big") {
-            iter.enumerate().rev().for_each(write_ne_bytes);
+            range.zip(iter).rev().for_each(write_ne_bytes);
         } else {
-            iter.enumerate().for_each(write_ne_bytes);
+            range.zip(iter).for_each(write_ne_bytes);
         }
 
-        Self { bytes, size_bytes, size_bits }
+        let size_bits = num::NonZeroU32::new(size_bits).unwrap();
+        let size_bytes = num::NonZeroUsize::new(size_bytes).unwrap();
+        Self { bytes, size_bits, size_bytes, mask }
     }
 
     /// Estimates the array's allocation size in bits.
     pub fn size_bits(&self) -> usize { self.bytes.len() * 8 }
 
-    // Returns the number of integers in the array.
+    /// Returns the number of elements in the array.
     pub fn len(&self) -> usize {
-        (self.bytes.len().saturating_sub(8 - self.size_bytes)) / self.size_bytes
+        (self.bytes.len() - (8 - self.size_bytes.get())) / self.size_bytes
     }
 
-    /// Returns `true` if the array is empty.
+    /// Returns `true` if the array contains no elements
     pub fn is_empty(&self) -> bool { self.len() == 0 }
+
+    /// Returns the size of integers stored in the array.
+    pub fn int_bits(&self) -> u32 { self.size_bits.get() }
+
+    /// Returns a mask with the `size_bits` least significant bits set.
+    pub fn mask(&self) -> u64 { self.mask }
 
     /// Returns an iterator over the elements of the array.
     pub fn iter(&self) -> Iter<'_> { Iter::new(self) }
 
     pub fn index(&self, index: usize) -> u64 {
-        // todo bounds checking??
-        let start = index * self.size_bytes;
+        let start = index * self.size_bytes.get();
         let slice = &self.bytes[start..start + 8];
         let ne_bytes = <&[_; 8]>::try_from(slice).unwrap();
-        let value = u64::from_ne_bytes(*ne_bytes);
-        value & (u64::MAX >> (64 - self.size_bits))
+        u64::from_ne_bytes(*ne_bytes) & self.mask
     }
 }
 
 impl Default for PackedArray {
-    fn default() -> Self { Self { bytes: Vec::new(), size_bytes: 1, size_bits: 1 } }
+    fn default() -> Self { Self::new(1, []) }
 }
 
 impl<'a> IntoIterator for &'a PackedArray {
@@ -109,9 +115,9 @@ impl fmt::Debug for PackedArray {
     }
 }
 
-/// An iterator over the integers in a packed array.
+/// An iterator over the elements of a packed integer array.
 pub struct Iter<'a> {
-    inner: StepBy<Windows<'a, u8>>, // todo array_windows?!
+    inner: iter::StepBy<slice::Windows<'a, u8>>, // todo array_windows?!
     mask: u64,
 }
 
@@ -119,8 +125,8 @@ pub struct Iter<'a> {
 impl<'a> Iter<'a> {
     fn new(array: &'a PackedArray) -> Self {
         Self {
-            inner: array.bytes.windows(8).step_by(array.size_bytes),
-            mask: u64::MAX >> (64 - array.size_bits),
+            inner: array.bytes.windows(8).step_by(array.size_bytes.get()),
+            mask: array.mask,
         }
     }
 
