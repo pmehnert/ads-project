@@ -1,8 +1,4 @@
-use std::{
-    fmt,
-    iter::{zip, Flatten, Take},
-    slice,
-};
+use std::{fmt, iter, iter::zip, slice};
 
 pub use block::Block;
 
@@ -15,7 +11,7 @@ pub mod block;
 pub mod flat_popcount;
 
 /// An iterator over the bits of a bit vector.
-pub type Iter<'a> = Take<Flatten<slice::Iter<'a, Block>>>;
+pub type Iter<'a> = iter::Take<iter::Flatten<slice::Iter<'a, Block>>>;
 
 /// A contiguous, cache aligned, and compact array of bits, short for 'bit vector'.
 ///
@@ -54,6 +50,20 @@ impl BitVec {
 
     /// Returns an (inefficient) iterator over the bits of the bit vector.
     pub fn iter(&self) -> Iter<'_> { self.blocks().iter().flatten().take(self.len) }
+
+    /// Returns the bit at the geven index in the bit vector.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the index is out of bounds.
+    pub fn index(&self, index: usize) -> bool {
+        if index < self.len {
+            let block = self.blocks()[index / Block::BITS];
+            block.0 & BitIndex::new(index).mask_bit() != 0
+        } else {
+            index_out_of_bounds_fail(index, self.len)
+        }
+    }
 
     /// Returns a slice containing the underlying cache aligned blocks of the bit vector.
     ///
@@ -111,6 +121,14 @@ impl fmt::Debug for BitVec {
     }
 }
 
+#[doc(hidden)]
+#[cold]
+#[inline(never)]
+#[track_caller]
+fn index_out_of_bounds_fail(index: usize, len: usize) -> ! {
+    panic!("index out of bounds: the length is {} but the index is {}", len, index)
+}
+
 #[cfg(test)]
 mod test {
     use std::iter::{empty, once, repeat};
@@ -150,5 +168,14 @@ mod test {
         let vec1: BitVec = once(false).collect();
         let vec64: BitVec = repeat(false).take(64).collect();
         assert_ne!(vec1, vec64);
+    }
+
+    #[test]
+    fn test_index() {
+        let pred = |i| i % 4 == 0 || i % 7 == 0;
+        let bitvec: BitVec = (0..1000).map(pred).collect();
+        for i in 0..1000 {
+            assert_eq!(pred(i), bitvec.index(i));
+        }
     }
 }

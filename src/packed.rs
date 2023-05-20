@@ -1,10 +1,6 @@
 //! A byte packed array of equally sized integers.
 
-use std::{
-    fmt,
-    iter::{FusedIterator, StepBy},
-    slice::Windows,
-};
+use std::{fmt, iter::FusedIterator, iter::StepBy, slice::Windows};
 
 /// A byte packed array of equally sized integers.
 ///
@@ -30,7 +26,8 @@ impl PackedArray {
     #[inline(never)]
     pub fn new<Values>(size_bits: u32, values: Values) -> Self
     where
-        Values: Iterator<Item = u64> + DoubleEndedIterator + ExactSizeIterator,
+        Values: IntoIterator<Item = u64>,
+        Values::IntoIter: DoubleEndedIterator + ExactSizeIterator,
     {
         assert!(
             (1..=64).contains(&size_bits),
@@ -38,6 +35,7 @@ impl PackedArray {
             size_bits,
         );
 
+        let values = values.into_iter();
         let size_bytes = crate::div_ceil(size_bits as usize, 8);
         let excess_bytes = 8 - size_bytes;
         assert!((1..=8).contains(&size_bytes));
@@ -83,6 +81,15 @@ impl PackedArray {
 
     /// Returns an iterator over the elements of the array.
     pub fn iter(&self) -> Iter<'_> { Iter::new(self) }
+
+    pub fn index(&self, index: usize) -> u64 {
+        // todo bounds checking??
+        let start = index * self.size_bytes;
+        let slice = &self.bytes[start..start + 8];
+        let ne_bytes = <&[_; 8]>::try_from(slice).unwrap();
+        let value = u64::from_ne_bytes(*ne_bytes);
+        value & (u64::MAX >> (64 - self.size_bits))
+    }
 }
 
 impl Default for PackedArray {
@@ -173,31 +180,41 @@ mod test {
         ];
 
         for (n, expected) in zip(1.., expected) {
-            let actual = PackedArray::new(n, SLIDES_EXAMPLE.into_iter());
+            let actual = PackedArray::new(n, SLIDES_EXAMPLE);
             assert!(expected.into_iter().eq(&actual))
         }
 
         for n in 7..=64 {
-            let actual = PackedArray::new(n, SLIDES_EXAMPLE.into_iter());
+            let actual = PackedArray::new(n, SLIDES_EXAMPLE);
             assert!(SLIDES_EXAMPLE.into_iter().eq(&actual));
         }
     }
 
     #[should_panic]
     #[test]
-    fn test_zero_bits() { PackedArray::new(0, SLIDES_EXAMPLE.into_iter()); }
+    fn test_zero_bits() { PackedArray::new(0, SLIDES_EXAMPLE); }
 
     #[should_panic]
     #[test]
-    fn test_too_many_bits() { PackedArray::new(65, SLIDES_EXAMPLE.into_iter()); }
+    fn test_too_many_bits() { PackedArray::new(65, SLIDES_EXAMPLE); }
 
     #[test]
     fn test_len_is_empty() {
         assert!(PackedArray::new(2, empty()).is_empty());
-        assert!(!PackedArray::new(2, SLIDES_EXAMPLE.into_iter()).is_empty());
+        assert!(!PackedArray::new(2, SLIDES_EXAMPLE).is_empty());
 
         assert_eq!(0, PackedArray::new(3, empty()).len());
-        assert_eq!(10, PackedArray::new(2, SLIDES_EXAMPLE.into_iter()).len());
-        assert_eq!(10, PackedArray::new(64, SLIDES_EXAMPLE.into_iter()).len());
+        assert_eq!(10, PackedArray::new(2, SLIDES_EXAMPLE).len());
+        assert_eq!(10, PackedArray::new(64, SLIDES_EXAMPLE).len());
+    }
+
+    #[test]
+    fn test_index() {
+        let array = PackedArray::new(2, SLIDES_EXAMPLE);
+
+        let expected = [0, 1, 2, 0, 3, 2, 0, 1, 2, 0];
+        for (i, expected) in expected.into_iter().enumerate() {
+            assert_eq!(expected, array.index(i));
+        }
     }
 }

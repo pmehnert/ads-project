@@ -19,6 +19,9 @@ use crate::{
     rmq::{fits_index, Naive, RangeMinimum},
 };
 
+
+// todo maybe use Box<[_]> instead of Vec<_> to make types smaller
+
 pub type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
 pub fn div_ceil(lhs: usize, rhs: usize) -> usize { lhs.saturating_add(rhs - 1) / rhs }
@@ -35,7 +38,8 @@ pub fn main() -> Result<TestResults> {
     fn run_pd(input: PredecessorInput) -> (Vec<u64>, usize) {
         let pd = EliasFano::new(&input.values);
 
-        let result = input.queries.iter().map(|value| pd.predecessor(*value)).collect();
+        let result =
+            input.queries.iter().map(|value| pd.predecessor(*value).unwrap()).collect();
 
         (result, pd.size_bits())
     }
