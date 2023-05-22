@@ -1,4 +1,5 @@
 pub mod bitvec;
+pub mod cartesian;
 pub mod int;
 pub mod packed;
 pub mod predecessor;
