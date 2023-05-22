@@ -4,9 +4,11 @@
 //!
 //! TODO
 
-use std::{borrow::Borrow, iter::zip};
+// todo rename this range_minimum?
 
-use crate::int::{AsIndex, IndexInt};
+use std::{borrow::Borrow, iter::zip, num::NonZeroUsize};
+
+use crate::{cartesian, int::AsHalfSize, int::AsIndex, int::IndexInt};
 
 /// Returns true iff `values` can be indexed using `Idx`.
 pub fn fits_index<Idx: IndexInt>(values: &[u64]) -> bool {
@@ -29,12 +31,16 @@ pub trait RangeMinimum {
 /// The answers are stored in `n` conceptual segments of size `n`, `n-1`, ..., `1`.
 /// The segments store answeres for ranges of length `1`, `2`, ..., `n` respectively.
 #[derive(Debug, Clone)]
-pub struct Naive<'a, Idx: IndexInt> {
+pub struct Naive<Idx> {
     table: Vec<Idx>,
-    values: &'a [u64],
+    len: usize,
 }
 
-impl<'a, Idx: IndexInt> Naive<'a, Idx> {
+impl<Idx> Default for Naive<Idx> {
+    fn default() -> Self { Self { table: Vec::new(), len: 0 } }
+}
+
+impl<Idx: IndexInt> Naive<Idx> {
     /// Cosntructs the RMQ data structure using dynamic programming.
     ///
     /// Starting with ranges of length `1`, the RMQ for each ranges of length
@@ -44,7 +50,7 @@ impl<'a, Idx: IndexInt> Naive<'a, Idx> {
     /// # Panics
     ///
     /// Panics if `values` cannot be index with `Idx` (see also [`fits_index`]).
-    pub fn new(values: &'a [u64]) -> Self {
+    pub fn new(values: &[u64]) -> Self {
         if !fits_index::<Idx>(values) {
             index_too_small_fail::<Idx>(values.len())
         }
@@ -63,27 +69,25 @@ impl<'a, Idx: IndexInt> Naive<'a, Idx> {
 
             (front, tail) = tail.split_at_mut(values.len() - n);
         }
-        Self { table, values }
+        Self { table, len: values.len() }
     }
 
     /// Returns the size of the allocation in bits.
     pub fn size_bits(&self) -> usize { 8 * std::mem::size_of_val(self.table.as_slice()) }
 }
 
-impl<'a, Idx: IndexInt> RangeMinimum for Naive<'a, Idx> {
+impl<Idx: IndexInt> RangeMinimum for Naive<Idx> {
     /// Retrieves `RMQ(lower, upper)` from the lookup table.
     ///
     /// First determines the index of the segment containing RMQ values for
     /// ranges of length `upper - lower + 1`. Then retrieves the RMQ value from
     /// the lookup table.
     fn range_min(&self, lower: usize, upper: usize) -> Option<usize> {
-        if lower <= upper && upper < self.values.len() {
-            let len = self.values.len();
-
+        if lower <= upper && upper < self.len {
             // Calculate N + (N-1) + ... + (N-(b-a)+1)
             // where N := self.len, a := lower, b := upper
-            let from = len - (upper - lower) + 1;
-            let offset = (len + 1 - from) * (from + len) / 2;
+            let from = self.len - (upper - lower) + 1;
+            let offset = (self.len + 1 - from) * (from + self.len) / 2;
 
             Some(self.table[offset + lower].to_usize())
         } else {
@@ -104,12 +108,17 @@ impl<'a, Idx: IndexInt> RangeMinimum for Naive<'a, Idx> {
 ///
 /// [10.5555/1120060.1712350]: https://dl.acm.org/doi/10.5555/1120060.1712350
 #[derive(Debug, Clone)]
-pub struct Sparse<'a, Idx: IndexInt> {
+pub struct Sparse<Idx, Values> {
     table: Vec<Idx>,
-    values: &'a [u64],
+    values: Values,
 }
 
-impl<'a, Idx: IndexInt> Sparse<'a, Idx> {
+impl<Idx, Values: Default> Default for Sparse<Idx, Values> {
+    fn default() -> Self { Self { table: Vec::new(), values: Default::default() } }
+}
+
+// todo sparse table needs to linearized
+impl<Idx: IndexInt, Values: Borrow<[u64]>> Sparse<Idx, Values> {
     /// Constructs the sparse table data structure using dynamic programming.
     ///
     /// Starting with ranges of length `1`, the RMQ for each range of length
@@ -119,15 +128,16 @@ impl<'a, Idx: IndexInt> Sparse<'a, Idx> {
     /// # Panics
     ///
     /// Panics if `values` cannot be index with `Idx` (see also [`fits_index`]).
-    pub fn new(values: &'a [u64]) -> Self {
-        if !fits_index::<Idx>(values) {
-            index_too_small_fail::<Idx>(values.len());
+    pub fn new(values: Values) -> Self {
+        let values_ref = values.borrow();
+        if !fits_index::<Idx>(values_ref) {
+            index_too_small_fail::<Idx>(values_ref.len());
         }
-        if values.is_empty() {
+        if values_ref.is_empty() {
             return Self { table: Vec::new(), values };
         }
 
-        let (len, log_len) = (values.len(), values.len().ilog2() as usize);
+        let (len, log_len) = (values_ref.len(), values_ref.len().ilog2() as usize);
         let mut table = vec![Idx::ZERO; len * (log_len + 1)];
 
         let (mut front, tail) = table.split_at_mut(len);
@@ -137,7 +147,7 @@ impl<'a, Idx: IndexInt> Sparse<'a, Idx> {
             let num = len - (1 << k) + 1;
             for (i, dst) in chunk[..num].iter_mut().enumerate() {
                 let (a, b) = (front[i], front[i + (1 << (k - 1))]);
-                *dst = arg_min(a.to_usize(), b.to_usize(), values).to_index();
+                *dst = arg_min(a.to_usize(), b.to_usize(), values_ref).to_index();
             }
             front = chunk;
         }
@@ -148,28 +158,173 @@ impl<'a, Idx: IndexInt> Sparse<'a, Idx> {
     pub fn size_bits(&self) -> usize { 8 * std::mem::size_of_val(self.table.as_slice()) }
 }
 
-impl<'a, Idx: IndexInt> RangeMinimum for Sparse<'a, Idx> {
+impl<Idx: IndexInt, Values: Borrow<[u64]>> RangeMinimum for Sparse<Idx, Values> {
     /// Calculates `RMQ(lower, upper)` using two overlapping ranges from the lookup table.
     ///
     /// Both ranges have size `2^k` where `k` is maximal and `2^k` still fits
     /// into the original range. The first range starts at `lower` and the
     /// second ends at `upper`.
     fn range_min(&self, lower: usize, upper: usize) -> Option<usize> {
-        if lower <= upper && upper < self.values.len() {
+        let values = self.values.borrow();
+        if lower <= upper && upper < values.len() {
             let log_len = usize::ilog2(upper - lower + 1) as usize;
-            let offset = self.values.len() * log_len;
+            let offset = values.len() * log_len;
             let left = self.table[offset + lower];
             let right = self.table[offset + upper + 1 - (1 << log_len)];
 
-            Some(arg_min(left.to_usize(), right.to_usize(), &self.values))
+            Some(arg_min(left.to_usize(), right.to_usize(), values))
         } else {
             None
         }
     }
 }
 
+/// # References
+///
+/// \[1\] Johannes Fischer and Volker Heun. _Theoretical and Practical Improvements
+/// on the RMQ-Problem, with Applications to LCA and LCE._ DOI: [10.1007/11780441_5]
+/// \[2\] Erik D. Demaine, et al. _On Cartesian Trees and Range Minimum Queries._
+/// DOI: [10.1007/s00453-012-9683-x]
+///
+/// [10.1007/11780441_5]: https://doi.org/10.1007/11780441_5
+/// [10.1007/s00453-012-9683-x]: https://doi.org/10.1007/s00453-012-9683-x
+#[derive(Debug, Clone)]
+pub struct Cartesian<'a, Idx>
+where
+    Idx: IndexInt + AsHalfSize,
+    Idx::HalfSize: IndexInt,
+{
+    reprs: Representatives<Idx>,
+    table: cartesian::Table<Idx::HalfSize>,
+    types: Vec<Idx::HalfSize>,
+    values: &'a [u64],
+}
+
+impl<'a, Idx> Cartesian<'a, Idx>
+where
+    Idx: IndexInt + AsHalfSize,
+    Idx::HalfSize: IndexInt,
+{
+    pub fn new(values: &'a [u64]) -> Self {
+        if !fits_index::<Idx>(values) {
+            index_too_small_fail::<Idx>(values.len());
+        }
+        // if values.is_empty() {
+        //     return todo!();
+        // }
+
+        let reprs = Representatives::<Idx>::new(values);
+        let block_size = reprs.block_size();
+        let table = cartesian::Table::<Idx::HalfSize>::new(block_size);
+        let mut builder = cartesian::Builder::<Idx::HalfSize>::new(block_size);
+
+        // todo use chunks exact?
+        let block_type = |block| builder.build(block).get();
+        let types = values.chunks(block_size).map(block_type).collect();
+
+        Self { reprs, table, types, values }
+    }
+
+    /// Returns the size of the allocation in bits.
+    pub fn size_bits(&self) -> usize { todo!() }
+}
+
+impl<'a, Idx> RangeMinimum for Cartesian<'a, Idx>
+where
+    Idx: IndexInt + AsHalfSize,
+    Idx::HalfSize: IndexInt,
+{
+    fn range_min(&self, lower: usize, upper: usize) -> Option<usize> {
+        // todo use magic numbers for division
+        if lower <= upper && upper < self.values.len() {
+            let size = self.reprs.block_size();
+            let (mut lower_block, lower_offset) = crate::div_mod(lower, size);
+            let (mut upper_block, upper_offset) = crate::div_mod(upper, size);
+
+            if lower_block == upper_block {
+                let tree = self.types[lower_block.to_usize()];
+                let idx = self.table.range_min(tree, lower_offset, upper_offset);
+                return Some(lower_block * size + usize::from(idx));
+            }
+
+            let lower_min = (lower_offset > 0).then(|| {
+                let tree = self.types[lower_block.to_usize()];
+                let idx = self.table.range_min(tree, lower_offset, size - 1);
+                let min = lower_block * size + usize::from(idx);
+                lower_block += 1;
+                min
+            });
+            let upper_min = (upper_offset < size - 1).then(|| {
+                let tree = self.types[upper_block.to_usize()];
+                let idx = self.table.range_min(tree, 0, upper_offset);
+                let min = upper_block * size + usize::from(idx);
+                upper_block -= 1;
+                min
+            });
+            let middle_min = (self.reprs)
+                .range_min(lower_block, upper_block)
+                .map(|(x, i)| x * size + usize::from(i));
+
+            let min = |lhs, rhs| arg_min(rhs, lhs, &self.values);
+            [lower_min, upper_min, middle_min].iter().flatten().copied().reduce(min)
+        } else {
+            None
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Representatives<Idx> {
+    block_size: NonZeroUsize,
+    blocks: Sparse<Idx, Vec<u64>>,
+    offsets: Vec<u8>,
+}
+
+impl<Idx> Default for Representatives<Idx> {
+    fn default() -> Self {
+        let block_size = NonZeroUsize::new(1).unwrap();
+        Self { block_size, blocks: Default::default(), offsets: Vec::new() }
+    }
+}
+
+impl<Idx: IndexInt> Representatives<Idx> {
+    // todo the codegen here kinda sucks
+    pub fn new(values: &[u64]) -> Self {
+        let block_size = values.len().next_power_of_two().ilog2() / 4;
+        let block_size = u32::max(1, block_size) as usize;
+
+        fn chunk_min(block: &[u64]) -> Option<(u8, u64)> {
+            zip(0.., block.iter().copied()).min_by_key(|(_, x)| *x)
+        }
+
+        let len = crate::div_ceil(values.len(), block_size);
+        let (mut offsets, mut blocks) = (vec![0; len], vec![0; len]);
+
+        let mut chunks = values.chunks_exact(block_size);
+        for (block, dst) in zip(&mut chunks, zip(&mut offsets, &mut blocks)) {
+            (*dst.0, *dst.1) = chunk_min(block).unwrap();
+        }
+        if let Some((idx, min)) = chunk_min(chunks.remainder()) {
+            *offsets.last_mut().unwrap() = idx;
+            *blocks.last_mut().unwrap() = min;
+        }
+
+        let block_size = block_size.try_into().unwrap();
+        Self { block_size, blocks: Sparse::new(blocks), offsets }
+    }
+
+    pub fn block_size(&self) -> usize { self.block_size.get() }
+
+    pub fn range_min(&self, lower: usize, upper: usize) -> Option<(usize, u8)> {
+        let block = self.blocks.range_min(lower, upper)?;
+        let offset = self.offsets[block];
+        Some((block, offset))
+    }
+}
+
+
 #[doc(hidden)]
-fn arg_min(rhs: usize, lhs: usize, values: &[u64]) -> usize {
+fn arg_min(lhs: usize, rhs: usize, values: &[u64]) -> usize {
     std::cmp::min_by_key(lhs, rhs, |x| values[*x])
 }
 
@@ -182,40 +337,45 @@ fn index_too_small_fail<Idx: IndexInt>(len: usize) -> ! {
 
 #[cfg(test)]
 mod test {
-    use crate::rmq::{Naive, RangeMinimum, Sparse};
+    use super::*;
 
     #[test]
     fn test_empty() {
-        let _rmq = Naive::<usize>::new(&[]);
-        let _rmq = Sparse::<usize>::new(&[]);
+        let _ = Naive::<usize>::new(&[]);
+        let _ = Sparse::<usize, _>::new(&[][..]);
+        let _ = Cartesian::<usize>::new(&[]);
     }
 
     #[test]
     fn test_one_element() {
-        let numbers = &[42];
+        let numbers = &[42][..];
         test_exhaustive(Naive::<usize>::new(numbers), numbers);
-        test_exhaustive(Sparse::<usize>::new(numbers), numbers);
+        test_exhaustive(Sparse::<usize, _>::new(numbers), numbers);
+        test_exhaustive(Cartesian::<usize>::new(numbers), numbers);
     }
 
     #[test]
     fn test_spec_example() {
-        let numbers = &[1, 0, 3, 7];
+        let numbers = &[1, 0, 3, 7][..];
         test_exhaustive(Naive::<usize>::new(numbers), numbers);
-        test_exhaustive(Sparse::<usize>::new(numbers), numbers);
+        test_exhaustive(Sparse::<usize, _>::new(numbers), numbers);
+        test_exhaustive(Cartesian::<usize>::new(numbers), numbers);
     }
 
     #[test]
     fn test_simple_example() {
-        let numbers = &[99, 32, 60, 90, 22, 26, 9];
+        let numbers = &[99, 32, 60, 90, 22, 26, 9][..];
         test_exhaustive(Naive::<usize>::new(numbers), numbers);
-        test_exhaustive(Sparse::<usize>::new(numbers), numbers);
+        test_exhaustive(Sparse::<usize, _>::new(numbers), numbers);
+        test_exhaustive(Cartesian::<usize>::new(numbers), numbers);
     }
 
     #[test]
     fn test_index_type_limits() {
         let numbers = (0..=255).collect::<Vec<_>>();
         test_exhaustive(Naive::<u8>::new(&numbers), &numbers);
-        test_exhaustive(Sparse::<u8>::new(&numbers), &numbers);
+        test_exhaustive(Sparse::<u8, _>::new(&*numbers), &numbers);
+        test_exhaustive(Cartesian::<u8>::new(&numbers), &numbers);
     }
 
     #[should_panic]
@@ -227,7 +387,13 @@ mod test {
     #[should_panic]
     #[test]
     fn test_index_too_small_sparse() {
-        let _ = Sparse::<u8>::new(&(0..=256).collect::<Vec<_>>());
+        let _ = Sparse::<u8, _>::new((0..=256).collect::<Vec<_>>());
+    }
+
+    #[should_panic]
+    #[test]
+    fn test_index_too_small_cartesian() {
+        let _ = Cartesian::<u8>::new(&(0..=256).collect::<Vec<_>>());
     }
 
     fn test_exhaustive(rmq: impl RangeMinimum, values: &[u64]) {
