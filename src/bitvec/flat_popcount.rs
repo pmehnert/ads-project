@@ -2,7 +2,8 @@
 
 use std::{borrow::Borrow, fmt, iter::zip};
 
-use crate::bitvec::{block::BitIndex, AlignedBlock, BitVec, Block};
+use super::{block::BitIndex, AlignedBlock, BitVec, Block};
+use crate::AllocationSize;
 
 /// Various static characteristic values of the flat-popcount data structure.
 #[allow(unused)]
@@ -51,7 +52,7 @@ pub type Hint = u32;
 ///
 /// [10.48550/arXiv.2206.01149]: https://doi.org/10.48550/arXiv.2206.01149
 #[derive(Debug, Default, Clone)]
-pub struct FlatPopcount<Bits: Borrow<BitVec>> {
+pub struct FlatPopcount<Bits> {
     bitvec: Bits,
     data: Vec<L1L2Data>,
     one_hints: Vec<Hint>,
@@ -177,13 +178,6 @@ impl<Bits: Borrow<BitVec>> FlatPopcount<Bits> {
 
         let total_zeros = bitvec.borrow().len() as u64 - total_ones;
         Self { bitvec, data, one_hints, zero_hints, total_ones, total_zeros }
-    }
-
-    /// Estimates the allocation size of the flat-popcount data structure in bits.
-    pub fn size_bits(&self) -> usize {
-        8 * std::mem::size_of_val(self.data.as_slice())
-            + 8 * std::mem::size_of_val(self.one_hints.as_slice())
-            + 8 * std::mem::size_of_val(self.zero_hints.as_slice())
     }
 
     /// Returns a reference to the underlying bit vector.
@@ -397,6 +391,14 @@ impl L1L2Data {
         } else {
             0
         }
+    }
+}
+
+impl<Bits> AllocationSize for FlatPopcount<Bits> {
+    fn size_bytes(&self) -> usize {
+        self.data.size_bytes()
+            + self.one_hints.size_bytes()
+            + self.zero_hints.size_bytes()
     }
 }
 

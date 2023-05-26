@@ -1,7 +1,12 @@
 use std::{marker::PhantomData, num::Wrapping};
 
-use crate::int::IndexInt;
+use crate::{int::IndexInt, AllocationSize};
 
+/// A compact, unqiue representation of a (small) cartesian tree
+///
+/// Each cartesian tree has a unqiue _signature_, which is defined by "the number
+/// of nodes removed from the rightmost path of the tree when inserting the `i`th
+/// element" [\[2\]](crate::rmq::Cartesian#references).
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Tree<Idx> {
     tree: usize,
@@ -77,21 +82,19 @@ impl<Idx: IndexInt> Builder<Idx> {
             (word << shift + 1) | 1
         });
 
-        // todo check for overflow here
         Tree::new(!word << (self.size - values.len()), self.size)
     }
+}
+
+impl<Idx> AllocationSize for Builder<Idx> {
+    fn size_bytes(&self) -> usize { self.stack.size_bytes() }
 }
 
 #[derive(Debug, Clone)]
 pub struct Table<Idx> {
     size: usize,
-    // todo this could really use u4s
     table: Vec<u8>,
     _phantom: PhantomData<Idx>,
-}
-
-impl<Idx> Default for Table<Idx> {
-    fn default() -> Self { Self { table: Vec::new(), size: 0, _phantom: PhantomData } }
 }
 
 impl<Idx: IndexInt> Table<Idx> {
@@ -120,6 +123,14 @@ impl<Idx: IndexInt> Table<Idx> {
     pub fn range_min(&self, tree: Idx, lower: usize, upper: usize) -> u8 {
         self.table[(self.size * tree.to_usize() + lower) * self.size + upper]
     }
+}
+
+impl<Idx> Default for Table<Idx> {
+    fn default() -> Self { Self { table: Vec::new(), size: 0, _phantom: PhantomData } }
+}
+
+impl<Idx> AllocationSize for Table<Idx> {
+    fn size_bytes(&self) -> usize { self.table.size_bytes() }
 }
 
 #[cfg(test)]

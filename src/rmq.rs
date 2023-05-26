@@ -8,7 +8,7 @@
 
 use std::{borrow::Borrow, iter::zip, num::NonZeroUsize};
 
-use crate::{cartesian, int::AsHalfSize, int::AsIndex, int::IndexInt};
+use crate::{cartesian::*, int::*, AllocationSize};
 
 /// Returns true iff `values` can be indexed using `Idx`.
 pub fn fits_index<Idx: IndexInt>(values: &[u64]) -> bool {
@@ -34,10 +34,6 @@ pub trait RangeMinimum {
 pub struct Naive<Idx> {
     table: Vec<Idx>,
     len: usize,
-}
-
-impl<Idx> Default for Naive<Idx> {
-    fn default() -> Self { Self { table: Vec::new(), len: 0 } }
 }
 
 impl<Idx: IndexInt> Naive<Idx> {
@@ -71,9 +67,14 @@ impl<Idx: IndexInt> Naive<Idx> {
         }
         Self { table, len: values.len() }
     }
+}
 
-    /// Returns the size of the allocation in bits.
-    pub fn size_bits(&self) -> usize { 8 * std::mem::size_of_val(self.table.as_slice()) }
+impl<Idx> Default for Naive<Idx> {
+    fn default() -> Self { Self { table: Vec::new(), len: 0 } }
+}
+
+impl<Idx> AllocationSize for Naive<Idx> {
+    fn size_bytes(&self) -> usize { self.table.size_bytes() }
 }
 
 impl<Idx: IndexInt> RangeMinimum for Naive<Idx> {
@@ -113,10 +114,6 @@ pub struct Sparse<Idx, Values> {
     values: Values,
 }
 
-impl<Idx, Values: Default> Default for Sparse<Idx, Values> {
-    fn default() -> Self { Self { table: Vec::new(), values: Default::default() } }
-}
-
 // todo sparse table needs to linearized
 impl<Idx: IndexInt, Values: Borrow<[u64]>> Sparse<Idx, Values> {
     /// Constructs the sparse table data structure using dynamic programming.
@@ -153,9 +150,14 @@ impl<Idx: IndexInt, Values: Borrow<[u64]>> Sparse<Idx, Values> {
         }
         Self { table, values }
     }
+}
 
-    /// Returns the size of the allocation in bits.
-    pub fn size_bits(&self) -> usize { 8 * std::mem::size_of_val(self.table.as_slice()) }
+impl<Idx, Values: Default> Default for Sparse<Idx, Values> {
+    fn default() -> Self { Self { table: Vec::new(), values: Default::default() } }
+}
+
+impl<Idx, Values: AllocationSize> AllocationSize for Sparse<Idx, Values> {
+    fn size_bytes(&self) -> usize { self.table.size_bytes() + self.values.size_bytes() }
 }
 
 impl<Idx: IndexInt, Values: Borrow<[u64]>> RangeMinimum for Sparse<Idx, Values> {
@@ -179,6 +181,8 @@ impl<Idx: IndexInt, Values: Borrow<[u64]>> RangeMinimum for Sparse<Idx, Values> 
     }
 }
 
+/// A data structure using cartesian trees to answer RMQs in `O(1)` time \[1\], \[2\].
+///
 /// # References
 ///
 /// \[1\] Johannes Fischer and Volker Heun. _Theoretical and Practical Improvements
@@ -195,10 +199,11 @@ where
     Idx::HalfSize: IndexInt,
 {
     reprs: Representatives<Idx>,
-    table: cartesian::Table<Idx::HalfSize>,
+    table: Table<Idx::HalfSize>,
     types: Vec<Idx::HalfSize>,
     values: &'a [u64],
 }
+// todo Default implementation
 
 impl<'a, Idx> Cartesian<'a, Idx>
 where
@@ -209,14 +214,11 @@ where
         if !fits_index::<Idx>(values) {
             index_too_small_fail::<Idx>(values.len());
         }
-        // if values.is_empty() {
-        //     return todo!();
-        // }
 
         let reprs = Representatives::<Idx>::new(values);
         let block_size = reprs.block_size();
-        let table = cartesian::Table::<Idx::HalfSize>::new(block_size);
-        let mut builder = cartesian::Builder::<Idx::HalfSize>::new(block_size);
+        let table = Table::<Idx::HalfSize>::new(block_size);
+        let mut builder = Builder::<Idx::HalfSize>::new(block_size);
 
         // todo use chunks exact?
         let block_type = |block| builder.build(block).get();
@@ -224,9 +226,19 @@ where
 
         Self { reprs, table, types, values }
     }
+}
 
-    /// Returns the size of the allocation in bits.
-    pub fn size_bits(&self) -> usize { todo!() }
+impl<'a, Idx> AllocationSize for Cartesian<'a, Idx>
+where
+    Idx: IndexInt + AsHalfSize,
+    Idx::HalfSize: IndexInt,
+{
+    fn size_bytes(&self) -> usize {
+        self.reprs.size_bytes()
+            + self.table.size_bytes()
+            + self.types.size_bytes()
+            + self.values.size_bytes()
+    }
 }
 
 impl<'a, Idx> RangeMinimum for Cartesian<'a, Idx>
@@ -280,13 +292,6 @@ pub struct Representatives<Idx> {
     offsets: Vec<u8>,
 }
 
-impl<Idx> Default for Representatives<Idx> {
-    fn default() -> Self {
-        let block_size = NonZeroUsize::new(1).unwrap();
-        Self { block_size, blocks: Default::default(), offsets: Vec::new() }
-    }
-}
-
 impl<Idx: IndexInt> Representatives<Idx> {
     // todo the codegen here kinda sucks
     pub fn new(values: &[u64]) -> Self {
@@ -322,6 +327,16 @@ impl<Idx: IndexInt> Representatives<Idx> {
     }
 }
 
+impl<Idx> Default for Representatives<Idx> {
+    fn default() -> Self {
+        let block_size = NonZeroUsize::new(1).unwrap();
+        Self { block_size, blocks: Default::default(), offsets: Vec::new() }
+    }
+}
+
+impl<Idx> AllocationSize for Representatives<Idx> {
+    fn size_bytes(&self) -> usize { self.blocks.size_bytes() + self.offsets.size_bytes() }
+}
 
 #[doc(hidden)]
 fn arg_min(lhs: usize, rhs: usize, values: &[u64]) -> usize {

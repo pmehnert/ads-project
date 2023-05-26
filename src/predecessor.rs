@@ -12,6 +12,7 @@ use std::{iter, iter::FusedIterator, slice};
 use crate::{
     bitvec::{flat_popcount::FlatPopcount, BitVec},
     packed::PackedArray,
+    AllocationSize,
 };
 
 /// An implementation of the quasi-succinct Elias-Fano coding for answering
@@ -53,13 +54,6 @@ impl EliasFano {
         Self { upper_half, lower_half, maximum: Some(maximum) }
     }
 
-    /// Estimates the data structure's allocation size in bits.
-    pub fn size_bits(&self) -> usize {
-        self.upper_half.bitvec().size_bits()
-            + self.upper_half.size_bits()
-            + self.lower_half.size_bits()
-    }
-
     /// Retuns the [predecessor](crate::predecessor#predecessor-problem) of
     /// `value` in the integer array encoded by this instance.
     pub fn predecessor(&self, value: u64) -> Option<u64> {
@@ -96,6 +90,14 @@ impl EliasFano {
                 Some((pred_upper << self.lower_half.int_bits()) | pred_lower)
             },
         }
+    }
+}
+
+impl AllocationSize for EliasFano {
+    fn size_bytes(&self) -> usize {
+        self.upper_half.size_bytes()
+            + self.upper_half.bitvec().size_bytes()
+            + self.lower_half.size_bytes()
     }
 }
 

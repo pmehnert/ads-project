@@ -2,6 +2,8 @@
 
 use std::{fmt, iter, iter::FusedIterator, num, slice};
 
+use crate::AllocationSize;
+
 /// A byte packed array of equally sized integers.
 ///
 /// Each integer fits into `size_bits` bits and occupies `size_bytes` bytes in
@@ -70,9 +72,6 @@ impl PackedArray {
         Self { bytes, size_bits, size_bytes, mask }
     }
 
-    /// Estimates the array's allocation size in bits.
-    pub fn size_bits(&self) -> usize { self.bytes.len() * 8 }
-
     /// Returns the number of elements in the array.
     pub fn len(&self) -> usize {
         (self.bytes.len() - (8 - self.size_bytes.get())) / self.size_bytes
@@ -100,6 +99,10 @@ impl PackedArray {
 
 impl Default for PackedArray {
     fn default() -> Self { Self::new(1, []) }
+}
+
+impl AllocationSize for PackedArray {
+    fn size_bytes(&self) -> usize { self.bytes.size_bytes() }
 }
 
 impl<'a> IntoIterator for &'a PackedArray {

@@ -44,7 +44,7 @@ pub fn main() -> Result<TestResults> {
         let result =
             input.queries.iter().map(|value| pd.predecessor(*value).unwrap()).collect();
 
-        (result, pd.size_bits() + 8 * std::mem::size_of_val(&pd))
+        (result, pd.size_bits() + 8 * std::mem::size_of::<EliasFano>())
     }
 
     fn run_rmq(input: RMQInput) -> (Vec<usize>, usize) {
@@ -91,6 +91,23 @@ pub fn main() -> Result<TestResults> {
     };
 
     Ok(TestResults { algo: args.algo, time, space })
+}
+
+/// A counterpart to [`std::mem::size_of`] for the dynamic size of types.
+pub trait AllocationSize {
+    /// Returns an estimate for the allocation size of `self` in bytes.
+    fn size_bytes(&self) -> usize;
+
+    /// Same as [`size_bytes`](Self::size_bytes), except using bits rather than bytes.
+    fn size_bits(&self) -> usize { 8 * self.size_bytes() }
+}
+
+impl<T> AllocationSize for [T] {
+    fn size_bytes(&self) -> usize { std::mem::size_of_val(self) }
+}
+
+impl<T> AllocationSize for Vec<T> {
+    fn size_bytes(&self) -> usize { std::mem::size_of_val(self.as_slice()) }
 }
 
 #[derive(Debug, Clone, Copy)]
