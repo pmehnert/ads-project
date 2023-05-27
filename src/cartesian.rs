@@ -1,6 +1,16 @@
-use std::{marker::PhantomData, num::Wrapping};
+//! Functionality for dealing with cartesian trees of small integer sequences.
+//!
+//! # Cartesian Trees
+//!
+//! Given a sequence `A`, a cartesian tree of `A` is a labeled binary tree where
+//!
+//! - the root `r` is labeled with the smallest element in `A`,
+//! - the left and right subtrees of `r` are recursively defined as the cartesian
+//! trees of the sequences to the left and right of the minimum.
 
-use crate::{int::IndexInt, AllocationSize};
+use std::marker::PhantomData;
+
+use crate::{int::IndexInt, rmq::RangeMinimum, AllocationSize};
 
 /// A compact, unqiue representation of a (small) cartesian tree
 ///
@@ -22,38 +32,53 @@ impl<Idx: IndexInt> Tree<Idx> {
 
     pub fn get(&self) -> Idx { Idx::from_usize(self.tree) }
 
+    /// Returns `true` for every valid cartesian tree and **may** return `false`
+    /// for invalid ones (e.g. too many`1`-bits).
     pub fn maybe_valid(&self) -> bool { (self.tree.count_ones() as usize) < self.size }
+}
 
-    // todo check lower  <= uper < len
-    pub fn range_min(&self, lower: usize, upper: usize) -> usize {
-        let mut index = Wrapping(self.tree.count_ones() as usize + self.size - 1);
-        let mut elem = 0;
-        while elem <= lower {
-            elem += usize::from(self.tree & (1 << index.0) == 0);
-            index -= 1;
-        }
+impl<Idx: IndexInt> RangeMinimum for Tree<Idx> {
+    /// Returns `RMQ(lower, upper)` using the cartesian [\[2\]] or [`None`] if
+    /// the range is empty or out of bounds.
+    ///
+    /// [\[2\]]: (crate::rmq::Cartesian#references)
+    fn range_min(&self, lower: usize, upper: usize) -> Option<usize> {
+        if lower <= upper && upper < self.size {
+            let mut index = self.tree.count_ones() as usize + self.size - 1;
+            if index >= usize::BITS as usize {
+                return Some(lower);
+            }
 
-        let (mut min, mut depth) = (lower, 0);
-        while elem <= upper {
-            let mut delta = 0;
-            while self.tree & (1 << index.0) != 0 {
-                delta += 1;
+            let mut elem = 0usize;
+            while elem < lower {
                 index -= 1;
+                elem += usize::from(self.tree & (1 << index) == 0);
             }
 
-            if delta >= depth + 1 {
-                (min, depth) = (elem, 0);
-            } else {
-                depth = depth + 1 - delta;
-            }
+            let (mut min, mut depth) = (lower, 0u32);
+            while elem < upper {
+                index -= 1;
+                elem += 1;
 
-            elem += 1;
-            index -= 1;
+                let mut delta = 0u32;
+                while self.tree & (1 << index) != 0 {
+                    delta += 1;
+                    index -= 1;
+                }
+
+                (min, depth) = match depth.checked_sub(delta) {
+                    Some(depth) => (min, depth + 1),
+                    None => (elem, 0),
+                };
+            }
+            Some(min)
+        } else {
+            None
         }
-        min
     }
 }
 
+/// Functionality for building cartesian trees.
 #[derive(Debug, Clone)]
 pub struct Builder<Idx> {
     size: usize,
@@ -66,14 +91,21 @@ impl<Idx: IndexInt> Builder<Idx> {
         Self { stack: Vec::with_capacity(size), size, _phantom: PhantomData }
     }
 
+    /// Returns the [representation](Tree) of the cartesian tree for the given
+    /// slice of values.
+    ///
+    /// Scans over the slice, keeps track of the rightmost path of the tree and
+    /// checks how many values are removed from the path each iteration.
+    ///
+    /// If `values` contains too few elements, it is padded with implicit,
+    /// infinitely large values.
     pub fn build(&mut self, values: &[u64]) -> Tree<Idx> {
         debug_assert!(values.len() <= self.size);
 
-        let mut iter = values.iter();
         self.stack.clear();
-        self.stack.extend(iter.next());
+        self.stack.extend(values.first());
 
-        let word = iter.fold(usize::MAX, |word, value| {
+        let word = values.iter().skip(1).fold(usize::MAX, |word, value| {
             let pos = self.stack.iter().rposition(|x| x <= value).map_or(0, |i| i + 1);
             let shift = self.stack.len() - pos;
             self.stack.truncate(pos);
@@ -90,6 +122,8 @@ impl<Idx> AllocationSize for Builder<Idx> {
     fn size_bytes(&self) -> usize { self.stack.size_bytes() }
 }
 
+/// A lookup table that stores the answer to every possible RMQ query for every
+/// cartesian tree with a given size.
 #[derive(Debug, Clone)]
 pub struct Table<Idx> {
     size: usize,
@@ -98,29 +132,32 @@ pub struct Table<Idx> {
 }
 
 impl<Idx: IndexInt> Table<Idx> {
+    /// TODO
     pub fn new(size: usize) -> Self {
         assert!(0 < size && 2 * size <= Idx::BITS as usize);
 
-        let num_trees = 2usize.checked_pow(2 * size as u32).unwrap();
+        let num_trees = 2usize.pow(2 * size as u32);
 
         let mut table = vec![0u8; size * size * num_trees];
         let chunks = table.chunks_exact_mut(size * size);
-
 
         for (tree, dst) in chunks.enumerate() {
             let tree = Tree::<Idx>::new(tree, size);
             if tree.maybe_valid() {
                 for i in 0..size {
                     for j in i..size {
-                        dst[i * size + j] = tree.range_min(i, j) as u8;
+                        dst[i * size + j] = tree.range_min(i, j).unwrap() as u8;
                     }
                 }
             }
         }
+
         Self { size, table, _phantom: PhantomData }
     }
 
-    pub fn range_min(&self, tree: Idx, lower: usize, upper: usize) -> u8 {
+    /// Returns the precomputed results for `RMQ(lower, upper)` on the given
+    /// cartesian tree.
+    pub fn get(&self, tree: Idx, lower: usize, upper: usize) -> u8 {
         self.table[(self.size * tree.to_usize() + lower) * self.size + upper]
     }
 }
@@ -216,7 +253,7 @@ mod test {
                 for i in 0..values.len() {
                     for j in i..values.len() {
                         let min = values[i..=j].iter().min().unwrap();
-                        assert_eq!(*min, values[tree.range_min(i, j)]);
+                        assert_eq!(*min, values[tree.range_min(i, j).unwrap()]);
                     }
                 }
             }
