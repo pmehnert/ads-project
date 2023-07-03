@@ -8,7 +8,7 @@ pub mod rmq;
 use std::{
     error::Error,
     fmt, fs,
-    io::{self, Write},
+    io::{BufRead, BufReader, Lines, Write},
     path::{Path, PathBuf},
     process::{ExitCode, Termination},
     time::{Duration, Instant},
@@ -19,9 +19,6 @@ use crate::{
     predecessor::EliasFano,
     rmq::{fits_index, Naive, RangeMinimum},
 };
-
-
-// todo maybe use Box<[_]> instead of Vec<_> to make types smaller
 
 pub type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
@@ -41,10 +38,12 @@ pub fn main() -> Result<TestResults> {
     fn run_pd(input: PredecessorInput) -> (Vec<u64>, usize) {
         let pd = EliasFano::new(&input.values);
 
-        let result =
-            input.queries.iter().map(|value| pd.predecessor(*value).unwrap()).collect();
+        // todo how to handle None here correctly?
+        let predecessor = |value| pd.predecessor(value).unwrap();
+        let results = input.queries.iter().copied().map(predecessor).collect();
+        let space = 8 * pd.size_bytes() + 8 * std::mem::size_of::<EliasFano>();
 
-        (result, pd.size_bits() + 8 * std::mem::size_of::<EliasFano>())
+        (results, space)
     }
 
     fn run_rmq(input: RMQInput) -> (Vec<usize>, usize) {
@@ -58,10 +57,11 @@ pub fn main() -> Result<TestResults> {
 
     fn run_rmq_with<Idx: IndexInt>(input: &RMQInput) -> (Vec<usize>, usize) {
         let rmq = Naive::<Idx>::new(&input.values);
-        let result = (input.queries.iter())
-            .map(|(lower, upper)| rmq.range_min(*lower, *upper).unwrap())
-            .collect();
-        (result, rmq.size_bits() + 8 * std::mem::size_of_val(&rmq))
+        let range_min = |(lower, upper)| rmq.range_min(lower, upper).unwrap();
+        let results = input.queries.iter().copied().map(range_min).collect();
+        let space = 8 * rmq.size_bytes() + 8 * std::mem::size_of_val(&rmq);
+
+        (results, space)
     }
 
     fn write_results(out_path: &Path, results: Vec<impl fmt::Display>) -> Result<()> {
@@ -73,7 +73,7 @@ pub fn main() -> Result<TestResults> {
 
     let args = Arguments::parse()?;
     let input_file = fs::OpenOptions::new().read(true).open(args.in_path)?;
-    let input_reader = io::BufReader::new(input_file);
+    let input_reader = BufReader::new(input_file);
 
     let (space, time) = match args.algo {
         Algorithm::Predecessor => {
@@ -97,9 +97,6 @@ pub fn main() -> Result<TestResults> {
 pub trait AllocationSize {
     /// Returns an estimate for the allocation size of `self` in bytes.
     fn size_bytes(&self) -> usize;
-
-    /// Same as [`size_bytes`](Self::size_bytes), except using bits rather than bytes.
-    fn size_bits(&self) -> usize { 8 * self.size_bytes() }
 }
 
 impl<T> AllocationSize for [T] {
@@ -200,7 +197,7 @@ pub struct PredecessorInput {
 }
 
 impl PredecessorInput {
-    pub fn parse(reader: impl io::BufRead) -> Result<Self> {
+    pub fn parse(reader: impl BufRead) -> Result<Self> {
         let mut lines = reader.lines();
         let values = parse_values(&mut lines)?;
 
@@ -219,7 +216,7 @@ pub struct RMQInput {
 }
 
 impl RMQInput {
-    pub fn parse(reader: impl io::BufRead) -> Result<Self> {
+    pub fn parse(reader: impl BufRead) -> Result<Self> {
         let mut lines = reader.lines();
         let values = parse_values(&mut lines)?;
 
@@ -237,7 +234,7 @@ impl RMQInput {
     }
 }
 
-fn parse_values(lines: &mut io::Lines<impl io::BufRead>) -> Result<Vec<u64>> {
+fn parse_values(lines: &mut Lines<impl BufRead>) -> Result<Vec<u64>> {
     let line = lines.next().ok_or(ParseError::MissingValue)??;
     let len = line.parse::<usize>()?;
 

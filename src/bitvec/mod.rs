@@ -1,3 +1,5 @@
+//! Compact arrays of bits.
+
 use std::{fmt, iter, iter::zip, slice};
 
 pub use block::Block;
@@ -7,6 +9,9 @@ use crate::{div_ceil, AllocationSize};
 
 pub mod block;
 pub mod flat_popcount;
+
+/// An acceleration data structure for rank and select queries on bit vectors.
+pub type RankSelect<Bits> = flat_popcount::FlatPopcount<Bits>;
 
 /// An iterator over the bits of a bit vector.
 pub type Iter<'a> = iter::Take<iter::Flatten<slice::Iter<'a, Block>>>;
@@ -18,7 +23,7 @@ pub type Iter<'a> = iter::Take<iter::Flatten<slice::Iter<'a, Block>>>;
 /// Bit vectors always uphold the following invariants.
 ///
 /// - The length of `self.blocks` is the minimum required to store `self.len` bits.
-/// - Any unused position of a block in `self.block` is set to `0`.
+/// - Any unused position of a block in `self.blocks` is set to `0`.
 #[derive(Clone, Default, PartialEq, Eq)]
 pub struct BitVec {
     blocks: Vec<AlignedBlock>,
@@ -69,6 +74,7 @@ impl BitVec {
     ///
     /// The last [`AlignedBlock::BLOCKS`] elements may contain unused bits, which are
     /// guranteed to be set to `0`.
+    #[inline(never)]
     pub fn blocks(&self) -> &[Block] {
         let aligned = self.aligned_blocks();
 
@@ -97,7 +103,7 @@ impl<'a> IntoIterator for &'a BitVec {
 impl FromIterator<bool> for BitVec {
     fn from_iter<Iter: IntoIterator<Item = bool>>(iter: Iter) -> Self {
         let mut iter = iter.into_iter().fuse().peekable();
-        let cap = div_ceil(iter.size_hint().0, Block::BITS);
+        let cap = crate::div_ceil(iter.size_hint().0, Block::BITS);
         let (mut blocks, mut len) = (Vec::with_capacity(cap), 0);
 
         while iter.peek().is_some() {

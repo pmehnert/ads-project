@@ -2,7 +2,7 @@
 //!
 //! # Cartesian Trees
 //!
-//! Given a sequence `A`, a cartesian tree of `A` is a labeled binary tree where
+//! Given a sequence `A`, a _cartesian tree_ of `A` is a labeled binary tree where
 //!
 //! - the root `r` is labeled with the smallest element in `A`,
 //! - the left and right subtrees of `r` are recursively defined as the cartesian
@@ -18,13 +18,13 @@ use crate::{int::IndexInt, rmq::RangeMinimum, AllocationSize};
 /// of nodes removed from the rightmost path of the tree when inserting the `i`th
 /// element" [\[2\]](crate::rmq::Cartesian#references).
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Tree<Idx> {
+pub struct CartesianTree<Idx> {
     tree: usize,
     size: usize,
     _phantom: PhantomData<Idx>,
 }
 
-impl<Idx: IndexInt> Tree<Idx> {
+impl<Idx: IndexInt> CartesianTree<Idx> {
     pub fn new(tree: usize, size: usize) -> Self {
         debug_assert!(2 * size <= Idx::BITS as usize);
         Self { tree, size, _phantom: PhantomData }
@@ -37,7 +37,9 @@ impl<Idx: IndexInt> Tree<Idx> {
     pub fn maybe_valid(&self) -> bool { (self.tree.count_ones() as usize) < self.size }
 }
 
-impl<Idx: IndexInt> RangeMinimum for Tree<Idx> {
+impl<Idx: IndexInt> RangeMinimum for CartesianTree<Idx> {
+    type Output = usize;
+
     /// Returns `RMQ(lower, upper)` using the cartesian [\[2\]] or [`None`] if
     /// the range is empty or out of bounds.
     ///
@@ -80,26 +82,26 @@ impl<Idx: IndexInt> RangeMinimum for Tree<Idx> {
 
 /// Functionality for building cartesian trees.
 #[derive(Debug, Clone)]
-pub struct Builder<Idx> {
+pub struct CartesianBuilder<Idx> {
     size: usize,
     stack: Vec<u64>,
     _phantom: PhantomData<Idx>,
 }
 
-impl<Idx: IndexInt> Builder<Idx> {
+impl<Idx: IndexInt> CartesianBuilder<Idx> {
     pub fn new(size: usize) -> Self {
         Self { stack: Vec::with_capacity(size), size, _phantom: PhantomData }
     }
 
-    /// Returns the [representation](Tree) of the cartesian tree for the given
-    /// slice of values.
+    /// Returns the [representation](CartesianTree) of the cartesian tree for
+    /// the given slice of values.
     ///
     /// Scans over the slice, keeps track of the rightmost path of the tree and
     /// checks how many values are removed from the path each iteration.
     ///
     /// If `values` contains too few elements, it is padded with implicit,
     /// infinitely large values.
-    pub fn build(&mut self, values: &[u64]) -> Tree<Idx> {
+    pub fn build(&mut self, values: &[u64]) -> CartesianTree<Idx> {
         debug_assert!(values.len() <= self.size);
 
         self.stack.clear();
@@ -111,28 +113,36 @@ impl<Idx: IndexInt> Builder<Idx> {
             self.stack.truncate(pos);
             self.stack.push(*value);
 
-            (word << shift + 1) | 1
+            (word << (shift + 1)) | 1
         });
 
-        Tree::new(!word << (self.size - values.len()), self.size)
+        CartesianTree::new(!word << (self.size - values.len()), self.size)
     }
 }
 
-impl<Idx> AllocationSize for Builder<Idx> {
+impl<Idx> AllocationSize for CartesianBuilder<Idx> {
     fn size_bytes(&self) -> usize { self.stack.size_bytes() }
 }
 
-/// A lookup table that stores the answer to every possible RMQ query for every
+/// A lookup table that stores the answer to every possible RMQ for every
 /// cartesian tree with a given size.
 #[derive(Debug, Clone)]
-pub struct Table<Idx> {
+pub struct CartesianTable<Idx> {
     size: usize,
     table: Vec<u8>,
     _phantom: PhantomData<Idx>,
 }
 
-impl<Idx: IndexInt> Table<Idx> {
-    /// TODO
+impl<Idx: IndexInt> CartesianTable<Idx> {
+    /// Constructs the lookup table by calculating every RMQ for every cartesian
+    /// tree with the given size.
+    ///
+    /// The function simply iterates over every bit string of length `2*size-1`
+    /// and answers each RMQ using the algorithm from [\[2\]] (see also
+    /// [`CartesianTree::range_min`]). Note that not every bit string is valid,
+    /// which generates "garbage" that is never actually accessed.
+    ///
+    /// [\[2\]]: crate::rmq::Cartesian#references
     pub fn new(size: usize) -> Self {
         assert!(0 < size && 2 * size <= Idx::BITS as usize);
 
@@ -142,7 +152,7 @@ impl<Idx: IndexInt> Table<Idx> {
         let chunks = table.chunks_exact_mut(size * size);
 
         for (tree, dst) in chunks.enumerate() {
-            let tree = Tree::<Idx>::new(tree, size);
+            let tree = CartesianTree::<Idx>::new(tree, size);
             if tree.maybe_valid() {
                 for i in 0..size {
                     for j in i..size {
@@ -162,11 +172,11 @@ impl<Idx: IndexInt> Table<Idx> {
     }
 }
 
-impl<Idx> Default for Table<Idx> {
+impl<Idx> Default for CartesianTable<Idx> {
     fn default() -> Self { Self { table: Vec::new(), size: 0, _phantom: PhantomData } }
 }
 
-impl<Idx> AllocationSize for Table<Idx> {
+impl<Idx> AllocationSize for CartesianTable<Idx> {
     fn size_bytes(&self) -> usize { self.table.size_bytes() }
 }
 
@@ -178,26 +188,26 @@ mod test {
 
     #[test]
     fn test_builder() {
-        let mut builder = Builder::<u16>::new(1);
+        let mut builder = CartesianBuilder::<u16>::new(1);
         assert_eq!(0b0, builder.build(&[]).get());
         assert_eq!(0b0, builder.build(&[1]).get());
 
-        let mut builder = Builder::<u16>::new(2);
+        let mut builder = CartesianBuilder::<u16>::new(2);
         assert_eq!(0b0, builder.build(&[]).get());
         assert_eq!(0b0, builder.build(&[1, 2]).get());
         assert_eq!(0b010, builder.build(&[2, 1]).get());
 
-        let mut builder = Builder::<u16>::new(3);
+        let mut builder = CartesianBuilder::<u16>::new(3);
         assert_eq!(0b0, builder.build(&[]).get());
         assert_eq!(0b0, builder.build(&[1, 2]).get());
         assert_eq!(0b0100, builder.build(&[2, 1]).get());
         assert_eq!(0b01010, builder.build(&[3, 2, 1]).get());
 
-        let mut builder = Builder::<u16>::new(4);
+        let mut builder = CartesianBuilder::<u16>::new(4);
         assert_eq!(0b0, builder.build(&[]).get());
         assert_eq!(0b0011010, builder.build(&[3, 4, 2, 1]).get());
 
-        let mut builder = Builder::<u16>::new(8);
+        let mut builder = CartesianBuilder::<u16>::new(8);
         assert_eq!(0b0, builder.build(&[]).get());
         assert_eq!(0b001011000100, builder.build(&[1, 7, 3, 0, 2, 6, 4, 5]).get());
     }
@@ -206,7 +216,7 @@ mod test {
     fn test_cartesian_tree_len_3_unique() {
         let types = [[1, 2, 3], [1, 3, 2], [2, 1, 3], [3, 2, 1], [2, 3, 1]];
 
-        let mut builder = Builder::<u8>::new(3);
+        let mut builder = CartesianBuilder::<u8>::new(3);
         let mut trees = HashSet::new();
         for t in types {
             assert!(trees.insert(builder.build(&t)));
@@ -223,7 +233,7 @@ mod test {
             [4, 2, 3, 1], [4, 3, 1, 2], [3, 4, 1, 2],
         ];
 
-        let mut builder = Builder::<u8>::new(4);
+        let mut builder = CartesianBuilder::<u8>::new(4);
         let mut trees = HashSet::new();
         for t in types {
             assert!(trees.insert(builder.build(&t)));
@@ -233,21 +243,21 @@ mod test {
     #[test]
     fn test_cartesian_table_u8() {
         for n in 1..=4 {
-            let _ = Table::<u8>::new(n);
+            let _ = CartesianTable::<u8>::new(n);
         }
     }
 
     #[test]
     fn test_cartesian_table_u16() {
         for n in 1..=8 {
-            let _ = Table::<u16>::new(n);
+            let _ = CartesianTable::<u16>::new(n);
         }
     }
 
     #[test]
     fn test_tree_range_min() {
         fn go(size: usize, values: &mut [u64]) {
-            let mut builder = Builder::<usize>::new(size);
+            let mut builder = CartesianBuilder::<usize>::new(size);
             while next_combination(values) {
                 let tree = builder.build(values);
                 for i in 0..values.len() {

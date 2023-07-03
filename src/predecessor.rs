@@ -5,12 +5,12 @@
 //! Given a _universe_ `U = 0..u` and a sorted sequence `A` of `n` integers from
 //! `U`, for any `x ∈ U` the _predecessor_ of `x` in `A` is defined as
 //!
-//! > `pred(x, A) = max {y ∈ A | y <= x}`.
+//! - `pred(x, A) = max {y ∈ A | y <= x}`.
 
 use std::{iter, iter::FusedIterator, slice};
 
 use crate::{
-    bitvec::{flat_popcount::FlatPopcount, BitVec},
+    bitvec::{BitVec, RankSelect},
     packed::PackedArray,
     AllocationSize,
 };
@@ -23,7 +23,7 @@ use crate::{
 /// stored in a byte packed array.
 #[derive(Debug, Default, Clone)]
 pub struct EliasFano {
-    upper_half: FlatPopcount<BitVec>,
+    upper_half: RankSelect<BitVec>,
     lower_half: PackedArray,
     maximum: Option<u64>,
 }
@@ -48,13 +48,13 @@ impl EliasFano {
         let lower_bits = 64u32.saturating_sub(upper_bits + unused_bits).max(1);
 
         let upper_iter = EliasFanoUpperIter::new(values, lower_bits);
-        let upper_half = FlatPopcount::new(upper_iter.collect());
+        let upper_half = RankSelect::new(upper_iter.collect());
         let lower_half = PackedArray::new(lower_bits, values.iter().copied());
 
         Self { upper_half, lower_half, maximum: Some(maximum) }
     }
 
-    /// Retuns the [predecessor](crate::predecessor#predecessor-problem) of
+    /// Returns the [predecessor](crate::predecessor#predecessor-problem) of
     /// `value` in the integer array encoded by this instance.
     pub fn predecessor(&self, value: u64) -> Option<u64> {
         let value_upper = value >> self.lower_half.int_bits();

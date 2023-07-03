@@ -5,7 +5,7 @@ use std::fmt;
 /// Integers that may be used to store indices.
 ///
 /// Types implementing this trait are guaranteed to be unsigned integers with
-/// value ranges of [`ZERO`](Self::ZERO) ..= [`MAX`](Self::MAX).
+/// value ranges of <code>[`ZERO`](Self::ZERO)..=[`MAX`](Self::MAX)</code>.
 ///
 /// This traits is _sealed_ and can therefore not be implemented on foreign types.
 pub trait IndexInt:
