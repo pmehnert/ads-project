@@ -1,6 +1,6 @@
 # Advanced Data Structures Project
 
-Project for the [Advanced Data Structures](algo2.iti.kit.edu/4521.php) lecture during summer term 2023.
+Project for the [Advanced Data Structures](https://algo2.iti.kit.edu/4521.php) lecture during summer term 2023.
 
 ## Build Requirements
 
@@ -11,13 +11,13 @@ No further external dependencies or any crates are required to build the project
 
 To code can be built and run using Cargo.
 
-```sh
+```
 cargo run --release [pd|rmq] <input-file> <output-file>
 ```
 
 The binary can also be executed explicitly.
 
-```sh
+```
 cargo build --release
 ./target/release/ads-project [pd|rmq] <input-file> <output-file>
 ```
@@ -29,6 +29,6 @@ Note that the code is built with `-Ctarget-cpu=native` (cf. `-march=native`) by 
 
 For an overview of what is implemented, see the `rustdoc` documentation.
 
-```sh
+```
 cargo doc --open
 ```
