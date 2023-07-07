@@ -26,7 +26,7 @@ pub fn div_ceil(lhs: usize, rhs: usize) -> usize { lhs.saturating_add(rhs - 1) /
 
 pub fn div_mod(lhs: usize, rhs: usize) -> (usize, usize) { (lhs / rhs, lhs % rhs) }
 
-pub fn main() -> Result<TestResults> {
+pub fn main() -> std::result::Result<TestResults, String> {
     #[inline(never)]
     fn run_timed<T>(f: impl FnOnce() -> T) -> (T, Duration) {
         let before = Instant::now();
@@ -71,26 +71,29 @@ pub fn main() -> Result<TestResults> {
         Ok(())
     }
 
-    let args = Arguments::parse()?;
-    let input_file = fs::OpenOptions::new().read(true).open(args.in_path)?;
-    let input_reader = BufReader::new(input_file);
+    fn run() -> Result<TestResults> {
+        let args = Arguments::parse()?;
+        let input_file = fs::OpenOptions::new().read(true).open(args.in_path)?;
+        let input_reader = BufReader::new(input_file);
 
-    let (space, time) = match args.algo {
-        Algorithm::Predecessor => {
-            let input = PredecessorInput::parse(input_reader)?;
-            let ((results, space), time) = run_timed(|| run_pd(input));
-            write_results(&args.out_path, results)?;
-            (space, time)
-        },
-        Algorithm::RangeMinimumQuery => {
-            let input = RMQInput::parse(input_reader)?;
-            let ((results, space), time) = run_timed(|| run_rmq(input));
-            write_results(&args.out_path, results)?;
-            (space, time)
-        },
-    };
+        let (space, time) = match args.algo {
+            Algorithm::Predecessor => {
+                let input = PredecessorInput::parse(input_reader)?;
+                let ((results, space), time) = run_timed(|| run_pd(input));
+                write_results(&args.out_path, results)?;
+                (space, time)
+            },
+            Algorithm::RangeMinimumQuery => {
+                let input = RMQInput::parse(input_reader)?;
+                let ((results, space), time) = run_timed(|| run_rmq(input));
+                write_results(&args.out_path, results)?;
+                (space, time)
+            },
+        };
+        Ok(TestResults { algo: args.algo, time, space })
+    }
 
-    Ok(TestResults { algo: args.algo, time, space })
+    run().map_err(|err| err.to_string())
 }
 
 /// A counterpart to [`std::mem::size_of`] for the dynamic size of types.
@@ -196,6 +199,7 @@ pub struct PredecessorInput {
     queries: Vec<u64>,
 }
 
+// todo what about repeated values
 impl PredecessorInput {
     pub fn parse(reader: impl BufRead) -> Result<Self> {
         let mut lines = reader.lines();
@@ -224,10 +228,11 @@ impl RMQInput {
         for line in lines {
             let line = line?;
             let (left, right) = line.split_once(',').ok_or(ParseError::NotARange)?;
-            if left > right {
+            let (lower, upper) = (left.parse()?, right.parse()?);
+            if lower > upper {
                 return Err(ParseError::EmptyRange.into());
             }
-            queries.push((left.parse()?, right.parse()?))
+            queries.push((lower, upper))
         }
 
         Ok(Self { values, queries })
