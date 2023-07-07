@@ -16,7 +16,10 @@ impl Output<u64> {
                 Err(0) => panic!("query {query} has no predecessor"),
                 Err(idx) => input.values[idx - 1],
             };
-            assert_eq!(expected, *actual);
+
+            if expected != *actual {
+                panic!("query {query} failed, expected {expected} but got {actual}");
+            }
         }
     }
 }
@@ -25,7 +28,15 @@ impl Output<usize> {
     pub fn check_rmq(&self, input: &RangeMinimumInput) {
         for (&(lo, hi), &actual) in zip(&input.queries, &self.results) {
             let (_, expected) = zip(&input.values[lo..=hi], lo..).min().unwrap();
-            assert_eq!(input.values[expected], input.values[actual]);
+            let expected_value = input.values[expected];
+            let actual_value = input.values[actual];
+
+            if expected_value != actual_value {
+                panic!(
+                    "query [{lo}, {hi}] failed, expected {expected_value} \
+                    (e.g. at {expected}) but got {actual_value} (at {actual})"
+                );
+            }
         }
     }
 }
