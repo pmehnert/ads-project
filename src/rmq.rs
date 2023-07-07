@@ -9,7 +9,7 @@
 //!
 //! returns the position of the smallest element in `A[a..=b]`.
 
-use std::{borrow::Borrow, iter::zip, num::NonZeroUsize};
+use std::{borrow::Borrow, iter::empty, iter::zip, num::NonZeroUsize};
 
 use crate::{cartesian::*, int::*, AllocationSize};
 
@@ -112,6 +112,10 @@ impl<Idx: IndexInt> RangeMinimum for Naive<Idx> {
 /// Stores the answeres for every possible query whose length is a power of two
 /// using `O(n log n)` space.
 ///
+/// Note the `Values` parameter, which allows the sparse table to take ownership
+/// of the underlying values if desired. This is used to implement
+/// [`Representatives`] in a sensible manner.
+///
 /// # References
 ///
 /// \[1\] Michael A. Bender et al. _Lowest Common Ancestors in Trees and Directed
@@ -167,6 +171,11 @@ impl<Idx, Values: Default> Default for Sparse<Idx, Values> {
 }
 
 impl<Idx, Values: AllocationSize> AllocationSize for Sparse<Idx, Values> {
+    // todo do values need to be included here?
+    fn size_bytes(&self) -> usize { self.table.size_bytes() + self.values.size_bytes() }
+}
+
+impl<Idx> AllocationSize for Sparse<Idx, &[u64]> {
     fn size_bytes(&self) -> usize { self.table.size_bytes() + self.values.size_bytes() }
 }
 
@@ -228,7 +237,13 @@ where
     Idx: IndexInt + AsHalfSize,
     Idx::HalfSize: IndexInt,
 {
-    /// TODO
+    /// Constructs the RMQ data structure and its numerous components.
+    ///
+    /// 1. A sparse table is constructed for blocks of `values`
+    /// (see also [`Representatives::new`]).
+    /// 2. A lookup table for all possible intra-block RMQs is constructed
+    /// using cartesian trees (see also [`CartesianTable::new`]).
+    /// 3. The cartesian tree for every block is precomuted and cached.
     ///
     /// # Panics
     ///
@@ -238,6 +253,7 @@ where
             index_too_small_fail::<Idx>(values.len());
         }
 
+        // todo add template parameter to "round up" blocks
         let reprs = Representatives::<Idx>::new(values);
         let block_size = reprs.block_size();
         let table = CartesianTable::<Idx::HalfSize>::new(block_size);
@@ -271,41 +287,47 @@ where
 {
     type Output = usize;
 
-    /// Calculates `RMQ(lower, upper)` using up to three subqueries.
+    /// Calculates `RMQ(values, lower, upper)` using up to three subqueries.
     ///
-    /// TODO
+    /// The minima of parts at the head and tail of the range are computed using
+    /// lookups into the [`CartesianTable`]. The minimum of the middle part is
+    /// computed using the sparse table of [`Representatives`]. The global
+    /// minimum is then computed trivially with lookups into `values`.
     fn range_min(&self, lower: usize, upper: usize) -> Option<usize> {
+        #[doc(hidden)]
+        fn div_mod(lhs: usize, rhs: usize) -> (usize, usize) { (lhs / rhs, lhs % rhs) }
+
         if lower <= upper && upper < self.values.len() {
-            let size = self.reprs.block_size();
+            let block_size = self.reprs.block_size();
             // TODO I am deeply unhappy with these divisions on a hot code path
-            let (lower_block, lower_offset) = crate::div_mod(lower, size);
-            let (upper_block, upper_offset) = crate::div_mod(upper, size);
+            let (lower_block, lower_rem) = div_mod(lower, block_size);
+            let (upper_block, upper_rem) = div_mod(upper, block_size);
 
             if lower_block == upper_block {
                 let tree = self.types[lower_block.to_usize()];
-                let idx = self.table.get(tree, lower_offset, upper_offset);
-                return Some(lower_block * size + usize::from(idx));
+                let idx = self.table.get(tree, lower_rem, upper_rem);
+                return Some(lower_block * block_size + usize::from(idx));
             }
 
-            std::iter::empty()
-                .chain((lower_offset > 0).then(|| {
+            empty()
+                .chain((lower_rem != 0).then(|| {
                     let tree = self.types[lower_block.to_usize()];
-                    let idx = self.table.get(tree, lower_offset, size - 1);
-                    lower_block * size + usize::from(idx)
+                    let idx = self.table.get(tree, lower_rem, block_size - 1);
+                    lower_block * block_size + usize::from(idx)
                 }))
-                .chain((upper_offset < size - 1).then(|| {
+                .chain((upper_rem != block_size - 1).then(|| {
                     let tree = self.types[upper_block.to_usize()];
-                    let idx = self.table.get(tree, 0, upper_offset);
-                    upper_block * size + usize::from(idx)
+                    let idx = self.table.get(tree, 0, upper_rem);
+                    upper_block * block_size + usize::from(idx)
                 }))
-                .chain(
+                .chain({
                     self.reprs
                         .range_min(
-                            lower_block + usize::from(lower_offset > 0),
-                            upper_block + usize::from(upper_block < size - 1),
+                            lower_block + usize::from(lower_rem != 0),
+                            upper_block - usize::from(upper_rem != block_size - 1),
                         )
-                        .map(|(x, i)| x * size + usize::from(i)),
-                )
+                        .map(|(x, i)| x * block_size + usize::from(i))
+                })
                 .reduce(|lhs, rhs| arg_min(rhs, lhs, self.values))
         } else {
             None
