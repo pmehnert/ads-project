@@ -11,8 +11,8 @@ use rand::{distributions::Uniform, prelude::Distribution};
 
 #[derive(Debug, Clone)]
 pub struct PredecessorInput {
-    values: Vec<u64>,
-    queries: Vec<u64>,
+    pub values: Vec<u64>,
+    pub queries: Vec<u64>,
 }
 
 impl PredecessorInput {
@@ -64,8 +64,8 @@ impl PredecessorInput {
 
 #[derive(Debug, Clone)]
 pub struct RangeMinimumInput {
-    values: Vec<u64>,
-    queries: Vec<(usize, usize)>,
+    pub values: Vec<u64>,
+    pub queries: Vec<(usize, usize)>,
 }
 
 impl RangeMinimumInput {

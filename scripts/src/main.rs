@@ -1,8 +1,10 @@
 use std::{error::Error, fs, io};
 
+use check::Output;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use input::{PredecessorInput, RangeMinimumInput};
 
+mod check;
 mod input;
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
@@ -29,11 +31,27 @@ fn run_gen(args: GenerateArguments) -> Result<()> {
             input.write(&mut io::BufWriter::new(file))?;
         },
     }
-
     Ok(())
 }
 
-fn run_check(args: CheckArguments) -> Result<()> { Ok(()) }
+fn run_check(args: CheckArguments) -> Result<()> {
+    let ifile = fs::OpenOptions::new().read(true).open(&args.input)?;
+    let ofile = fs::OpenOptions::new().read(true).open(&args.output)?;
+
+    match args.algo {
+        Algorithm::Predecessor => {
+            let input = PredecessorInput::parse(io::BufReader::new(ifile))?;
+            let output = Output::<u64>::parse(io::BufReader::new(ofile))?;
+            output.check_pd(&input);
+        },
+        Algorithm::RangeMinimum => {
+            let input = RangeMinimumInput::parse(io::BufReader::new(ifile))?;
+            let output = Output::<usize>::parse(io::BufReader::new(ofile))?;
+            output.check_rmq(&input);
+        },
+    }
+    Ok(())
+}
 
 #[derive(Parser)]
 struct Arguments {
@@ -45,7 +63,6 @@ struct Arguments {
 enum Commands {
     #[command(name = "gen")]
     Generate(GenerateArguments),
-
     #[command(name = "check")]
     Check(CheckArguments),
 }
