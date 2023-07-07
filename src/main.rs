@@ -56,6 +56,7 @@ pub fn main() -> std::result::Result<TestResults, String> {
     }
 
     fn run_rmq_with<Idx: IndexInt>(input: &RMQInput) -> (Vec<usize>, usize) {
+        // todo run fastest implementation
         let rmq = Naive::<Idx>::new(&input.values);
         let range_min = |(lower, upper)| rmq.range_min(lower, upper).unwrap();
         let results = input.queries.iter().copied().map(range_min).collect();

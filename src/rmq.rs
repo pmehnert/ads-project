@@ -32,6 +32,7 @@ pub trait RangeMinimum {
     fn range_min(&self, lower: usize, upper: usize) -> Option<Self::Output>;
 }
 
+// todo add template parameter `bool Linearize`
 /// The naive approach for answering RMQs in `O(1)` time.
 ///
 /// Stores the answer for every possible query in `table` using `O(n²)` space.
@@ -55,7 +56,7 @@ impl<Idx: IndexInt> Naive<Idx> {
     /// Panics if `values` cannot be index with `Idx` (see also [`fits_index`]).
     pub fn new(values: &[u64]) -> Self {
         if !fits_index::<Idx>(values) {
-            index_too_small_fail::<Idx>(values.len())
+            index_too_small_fail::<Idx>(values.len());
         }
 
         // The lookup table has length N + (N-1) + ... + 1.
