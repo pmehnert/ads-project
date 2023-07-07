@@ -3,14 +3,6 @@ name = "scripts"
 version = "0.1.0"
 edition = "2021"
 
-[[bin]]
-name = "gen-pd"
-path = "src/predecessor.rs"
-
-[[bin]]
-name = "gen-rmq"
-path = "src/range_min.rs"
-
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]

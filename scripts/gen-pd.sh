@@ -1,6 +1,6 @@
 #!/bin/bash
 
-bin="cargo run --release --bin gen-pd"
+bin="cargo run --release gen pd"
 
 # 2^10 -- 2^30
 test_sizes="
@@ -27,12 +27,12 @@ test_sizes="
 1073741824:1G
 "
 
+set -u
+
 for size in $test_sizes; do
     num_values=${size%:*}
-    human_readable=${size#*:}
+    num_values_readable=${size#*:}
     num_queries=1000000
-    path_prefix="${1}"
-    input_path="${path_prefix}/pd-${human_readable}.in"
-    output_path="${path_prefix}/pd-${human_readable}.out"
-    ${bin} "${input_path}" "${output_path}" ${num_values} ${num_queries}
+    input_path="${1}/${2}.${num_values_readable}"
+    ${bin} "${input_path}" ${num_values} ${num_queries}
 done
