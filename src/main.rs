@@ -8,7 +8,7 @@ pub mod rmq;
 use std::{
     error::Error,
     fmt, fs,
-    io::{BufRead, BufReader, Lines, Write},
+    io::{BufRead, BufReader, BufWriter, Lines, Write},
     path::{Path, PathBuf},
     process::{ExitCode, Termination},
     time::{Duration, Instant},
@@ -35,10 +35,10 @@ pub fn main() -> std::result::Result<TestResults, String> {
         (result, elapsed)
     }
 
+    #[inline(never)]
     fn run_pd(input: PredecessorInput) -> (Vec<u64>, usize) {
         let pd = EliasFano::new(&input.values);
 
-        // todo how to handle None here correctly?
         let predecessor = |value| pd.predecessor(value).unwrap();
         let results = input.queries.iter().copied().map(predecessor).collect();
         let space = 8 * pd.size_bytes() + 8 * std::mem::size_of::<EliasFano>();
@@ -46,18 +46,21 @@ pub fn main() -> std::result::Result<TestResults, String> {
         (results, space)
     }
 
+    #[inline(never)]
     fn run_rmq(input: RMQInput) -> (Vec<usize>, usize) {
         // todo do all three implementations need to be run here?
         match &input.values {
-            values if fits_index::<u16>(values) => run_rmq_with::<u16>(&input),
-            values if fits_index::<u32>(values) => run_rmq_with::<u32>(&input),
-            _ => run_rmq_with::<usize>(&input),
+            values if fits_index::<u16>(values) => run_rmq_with::<u16>(input),
+            values if fits_index::<u32>(values) => run_rmq_with::<u32>(input),
+            _ => run_rmq_with::<usize>(input),
         }
     }
 
-    fn run_rmq_with<Idx: IndexInt>(input: &RMQInput) -> (Vec<usize>, usize) {
+    fn run_rmq_with<Idx: IndexInt>(input: RMQInput) -> (Vec<usize>, usize) {
         // todo run fastest implementation
+        // todo drop values after this point
         let rmq = Naive::<Idx>::new(&input.values);
+
         let range_min = |(lower, upper)| rmq.range_min(lower, upper).unwrap();
         let results = input.queries.iter().copied().map(range_min).collect();
         let space = 8 * rmq.size_bytes() + 8 * std::mem::size_of_val(&rmq);
@@ -65,10 +68,14 @@ pub fn main() -> std::result::Result<TestResults, String> {
         (results, space)
     }
 
-    fn write_results(out_path: &Path, results: Vec<impl fmt::Display>) -> Result<()> {
-        let mut out_file =
-            fs::OpenOptions::new().write(true).create(true).open(out_path)?;
-        results.iter().try_for_each(|x| writeln!(out_file, "{}", x))?;
+    fn write_results<T: fmt::Display>(out_path: &Path, results: &[T]) -> Result<()> {
+        let out_file = fs::OpenOptions::new()
+            .write(true)
+            .truncate(true)
+            .create(true)
+            .open(out_path)?;
+        let mut writer = BufWriter::new(out_file);
+        results.iter().try_for_each(|x| writeln!(writer, "{x}"))?;
         Ok(())
     }
 
@@ -81,13 +88,14 @@ pub fn main() -> std::result::Result<TestResults, String> {
             Algorithm::Predecessor => {
                 let input = PredecessorInput::parse(input_reader)?;
                 let ((results, space), time) = run_timed(|| run_pd(input));
-                write_results(&args.out_path, results)?;
+                println!("predecessor {}", results.len());
+                write_results(&args.out_path, &results)?;
                 (space, time)
             },
             Algorithm::RangeMinimumQuery => {
                 let input = RMQInput::parse(input_reader)?;
                 let ((results, space), time) = run_timed(|| run_rmq(input));
-                write_results(&args.out_path, results)?;
+                write_results(&args.out_path, &results)?;
                 (space, time)
             },
         };
@@ -195,6 +203,7 @@ impl fmt::Display for ParseError {
     }
 }
 
+// todo allow for empty lines in input
 pub struct PredecessorInput {
     values: Vec<u64>,
     queries: Vec<u64>,
