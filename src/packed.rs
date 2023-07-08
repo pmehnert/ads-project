@@ -120,7 +120,7 @@ impl fmt::Debug for PackedArray {
 
 /// An iterator over the elements of a packed integer array.
 pub struct Iter<'a> {
-    inner: iter::StepBy<slice::Windows<'a, u8>>, // todo array_windows?!
+    inner: iter::StepBy<slice::Windows<'a, u8>>,
     mask: u64,
 }
 

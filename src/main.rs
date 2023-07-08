@@ -15,16 +15,14 @@ use std::{
 };
 
 use crate::{
-    int::IndexInt,
+    int::{AsHalfSize, IndexInt},
     predecessor::EliasFano,
-    rmq::{fits_index, Naive, RangeMinimum},
+    rmq::{fits_index, RangeMinimum, Sparse},
 };
 
 pub type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
 pub fn div_ceil(lhs: usize, rhs: usize) -> usize { lhs.saturating_add(rhs - 1) / rhs }
-
-pub fn div_mod(lhs: usize, rhs: usize) -> (usize, usize) { (lhs / rhs, lhs % rhs) }
 
 pub fn main() -> std::result::Result<TestResults, String> {
     #[inline(never)]
@@ -39,7 +37,8 @@ pub fn main() -> std::result::Result<TestResults, String> {
     fn run_pd(input: PredecessorInput) -> (Vec<u64>, usize) {
         let pd = EliasFano::new(&input.values);
 
-        let predecessor = |value| pd.predecessor(value).unwrap();
+        // todo question: what if value < minimum?
+        let predecessor = |value| pd.predecessor(value).unwrap_or(0);
         let results = input.queries.iter().copied().map(predecessor).collect();
         let space = 8 * pd.size_bytes() + 8 * std::mem::size_of::<EliasFano>();
 
@@ -48,7 +47,6 @@ pub fn main() -> std::result::Result<TestResults, String> {
 
     #[inline(never)]
     fn run_rmq(input: RMQInput) -> (Vec<usize>, usize) {
-        // todo do all three implementations need to be run here?
         match &input.values {
             values if fits_index::<u16>(values) => run_rmq_with::<u16>(input),
             values if fits_index::<u32>(values) => run_rmq_with::<u32>(input),
@@ -56,10 +54,14 @@ pub fn main() -> std::result::Result<TestResults, String> {
         }
     }
 
-    fn run_rmq_with<Idx: IndexInt>(input: RMQInput) -> (Vec<usize>, usize) {
-        // todo run fastest implementation
-        // todo drop values after this point
-        let rmq = Naive::<Idx>::new(&input.values);
+    fn run_rmq_with<Idx>(input: RMQInput) -> (Vec<usize>, usize)
+    where
+        Idx: IndexInt + AsHalfSize,
+        Idx::HalfSize: IndexInt,
+    {
+        // let rmq = Naive::<Idx>::new(&input.values);
+        let rmq = Sparse::<Idx, &[_]>::new(&input.values);
+        // let rmq = Cartesian::<Idx>::new(&input.values);
 
         let range_min = |(lower, upper)| rmq.range_min(lower, upper).unwrap();
         let results = input.queries.iter().copied().map(range_min).collect();
@@ -88,7 +90,6 @@ pub fn main() -> std::result::Result<TestResults, String> {
             Algorithm::Predecessor => {
                 let input = PredecessorInput::parse(input_reader)?;
                 let ((results, space), time) = run_timed(|| run_pd(input));
-                println!("predecessor {}", results.len());
                 write_results(&args.out_path, &results)?;
                 (space, time)
             },
@@ -163,7 +164,6 @@ pub struct TestResults {
 
 impl Termination for TestResults {
     fn report(self) -> ExitCode {
-        // todo check output specification (equal sign after name)
         let _ = writeln!(
             std::io::stderr(),
             "RESULT algo={} namepascal_mehnert time={} space={}",

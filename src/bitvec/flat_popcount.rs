@@ -169,7 +169,7 @@ impl<Bits: Borrow<BitVec>> FlatPopcount<Bits> {
                     hints.push(i - 1);
                 }
             }
-            if total_bs as u64 >= next_hint {
+            if total_bs >= next_hint {
                 hints.push(data.len().saturating_sub(1) as u32);
             }
             hints
@@ -247,7 +247,6 @@ impl<Bits: Borrow<BitVec>> FlatPopcount<Bits> {
         }
 
         if sub_index != 0 {
-            // todo use a rank1 instead
             let index_inclusive = BitIndex::new(sub_index - 1);
             rank += u64::from(l2_block[block_index].rank1_inclusive(index_inclusive));
         }
@@ -289,7 +288,6 @@ impl<Bits: Borrow<BitVec>> FlatPopcount<Bits> {
         }
     }
 
-    // todo add RankB as proper type or struct or similar
     /// Returns the index of the first `0`-bit with the given rank, i.e. the
     /// `rank`th `0`-bit (see also [`select1`](Self::select1)).
     ///
@@ -371,6 +369,7 @@ impl L1L2Data {
     ///
     /// Any bits that exceed the range of a `u44` or `u12` respectively are masked.
     #[allow(clippy::erasing_op, clippy::identity_op)]
+    #[inline(never)]
     pub fn new(l1_ones: u64, l2_ones: &[u16; 8]) -> Self {
         debug_assert_eq!(0, l2_ones[0]);
         debug_assert_eq!(l1_ones, l1_ones & Self::U44_MASK as u64);
@@ -392,12 +391,10 @@ impl L1L2Data {
     /// Returns the number of `1`-bits up to the beginning of the L1-block.
     pub fn l1_ones(self) -> u64 { (Self::U44_MASK & self.0) as u64 }
 
-    // todo the general case here is terrible
-    // todo what about out of bounds
     /// Returns the number of `1`-bits from the beginning of the L1-block up to the given L2-block.
     ///
-    /// todo
-    /// _A note on performance_: The compiler can only optimize this function
+    /// _A note on performance: The compiler emits quite poor code for this function
+    /// if the value of `size` is not statically known._
     pub fn l2_ones(self, index: usize) -> u16 {
         if index > 0 {
             (Self::U12_MASK & (self.0 >> (index * 12 + 44 - 12))) as u16
@@ -459,7 +456,7 @@ mod test {
 
     #[test]
     fn test_l1l2_construction() {
-        let data = L1L2Data::new(42, &[1, 2, 3, 4, 5, 6, 4095]);
+        let data = L1L2Data::new(42, &[0, 1, 2, 3, 4, 5, 6, 4095]);
         assert_eq!(42, data.l1_ones());
         assert_eq!(0, data.l2_ones(0));
         assert_eq!(1, data.l2_ones(1));

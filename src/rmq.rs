@@ -128,7 +128,7 @@ pub struct Sparse<Idx, Values> {
     values: Values,
 }
 
-// todo sparse table needs to linearized
+// todo sparse table needs to be linearized
 impl<Idx: IndexInt, Values: Borrow<[u64]>> Sparse<Idx, Values> {
     /// Constructs the sparse table data structure using dynamic programming.
     ///
@@ -258,7 +258,6 @@ where
         let block_size = reprs.block_size();
         let table = CartesianTable::<Idx::HalfSize>::new(block_size);
 
-        // todo use chunks exact?
         let mut builder = CartesianBuilder::<Idx::HalfSize>::new(block_size);
         let block_type = |block| builder.build(block).get();
         let types = values.chunks(block_size).map(block_type).collect();

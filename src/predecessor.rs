@@ -34,10 +34,7 @@ impl EliasFano {
     /// The elements of `values` must be sorted in ascending order. If they are
     /// not, the program may panic or produce unexpected results, but will not
     /// result in undefined behaviour.
-    ///
-    /// **Note:** This should really accept an iterator not a slice.
     pub fn new(values: &[u64]) -> Self {
-        // todo ignore equal MSBs of values to be able to partition input
         let maximum = match values.last() {
             Some(last) => *last,
             None => return Default::default(),
@@ -215,7 +212,7 @@ mod test {
         values
             .iter()
             .flat_map(move |val| {
-                let delta = dbg!((*val - last.unwrap_or(0)) as usize);
+                let delta = (*val - last.unwrap_or(0)) as usize;
                 repeat(replace(&mut last, Some(*val))).take(delta)
             })
             .chain(repeat(values.last().copied()))
