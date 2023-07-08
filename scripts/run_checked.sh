@@ -5,10 +5,12 @@ set -u
 run="cargo run --release"
 check="cargo -Z unstable-options -C scripts run --release check"
 
-algo="${1}"
-input="${2}"
-output="${3}"
+name="${1}"
+problem="${2}"
+algo="${3}"
+input="${4}"
+output="${5}"
 
-${run} "${algo}" "${input}" "${output}"
-${check} "${algo}" "${input}" "${output}"
+${run} "${name}" "${problem}" "${algo}" "${input}" "${output}"
+${check} "${problem}" "${input}" "${output}"
 

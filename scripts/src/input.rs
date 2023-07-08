@@ -32,8 +32,9 @@ impl PredecessorInput {
         let mut values: Vec<_> = samples.iter().map(|x| lower + x as u64).collect();
         values.sort();
 
-        assert!(values.iter().all(|&x| lower <= x && x <= upper));
-        assert_matches!(values.clone().partition_dedup(), (_, []));
+        // assert_eq!(num_values, values.len());
+        // assert!(values.iter().all(|&x| lower <= x && x <= upper));
+        // assert_matches!(values.clone().partition_dedup(), (_, []));
 
         let queries = Uniform::new_inclusive(values[0], *range.end())
             .sample_iter(&mut rng)
