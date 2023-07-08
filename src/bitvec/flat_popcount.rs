@@ -128,29 +128,27 @@ impl<Bits: Borrow<BitVec>> FlatPopcount<Bits> {
         for (l1l2_data, l1_block) in zip(&mut data, l1_blocks.by_ref()) {
             let (mut l1_ones, mut l2_ones) = (0u16, [0u16; 8]);
             for (dst, l2_block) in zip(&mut l2_ones, l1_block.iter()) {
-                l1_ones += count_l2_ones(l2_block) as u16;
                 *dst = l1_ones;
+                l1_ones += count_l2_ones(l2_block) as u16;
             }
 
-            let l2_ones = <&[_; 7]>::try_from(&l2_ones[0..7]).unwrap();
-            *l1l2_data = L1L2Data::new(total_ones, l2_ones);
+            *l1l2_data = L1L2Data::new(total_ones, &l2_ones);
             total_ones += u64::from(l1_ones);
         }
 
-        // todo maybe always push a guardian L1L2Data
         // Write L1L2Data for the partially filled L1 bock if one exists
         if !l1_blocks.remainder().is_empty() {
             let (mut l1_ones, mut l2_ones) = (0u16, [0u16; 8]);
 
             let mut dst_iter = l2_ones.iter_mut();
-            for (dst, l2_block) in zip(dst_iter.by_ref(), l1_blocks.remainder()) {
-                l1_ones += count_l2_ones(l2_block) as u16;
+            // Order of arguments to `zip` is VERY important here
+            for (l2_block, dst) in zip(l1_blocks.remainder(), dst_iter.by_ref()) {
                 *dst = l1_ones;
+                l1_ones += count_l2_ones(l2_block) as u16;
             }
             dst_iter.for_each(|dst| *dst = l1_ones);
 
-            let l2_ones = <&[_; 7]>::try_from(&l2_ones[0..7]).unwrap();
-            data.push(L1L2Data::new(total_ones, l2_ones));
+            data.push(L1L2Data::new(total_ones, &l2_ones));
             total_ones += u64::from(l1_ones);
         }
 
@@ -373,9 +371,13 @@ impl L1L2Data {
     ///
     /// Any bits that exceed the range of a `u44` or `u12` respectively are masked.
     #[allow(clippy::erasing_op, clippy::identity_op)]
-    pub fn new(l1_ones: u64, l2_ones: &[u16; 7]) -> Self {
-        let [l2_1, l2_2, l2_3, l2_4, l2_5, l2_6, l2_7] = l2_ones;
-        Self(
+    pub fn new(l1_ones: u64, l2_ones: &[u16; 8]) -> Self {
+        debug_assert_eq!(0, l2_ones[0]);
+        debug_assert_eq!(l1_ones, l1_ones & Self::U44_MASK as u64);
+        debug_assert!(l2_ones.iter().all(|x| *x == x & Self::U12_MASK as u16));
+
+        let [_, l2_1, l2_2, l2_3, l2_4, l2_5, l2_6, l2_7] = l2_ones;
+        Self({
             (Self::U44_MASK & u128::from(l1_ones))
                 | (Self::U12_MASK & u128::from(*l2_1)) << (44 + 0 * 12)
                 | (Self::U12_MASK & u128::from(*l2_2)) << (44 + 1 * 12)
@@ -383,8 +385,8 @@ impl L1L2Data {
                 | (Self::U12_MASK & u128::from(*l2_4)) << (44 + 3 * 12)
                 | (Self::U12_MASK & u128::from(*l2_5)) << (44 + 4 * 12)
                 | (Self::U12_MASK & u128::from(*l2_6)) << (44 + 5 * 12)
-                | (Self::U12_MASK & u128::from(*l2_7)) << (44 + 6 * 12),
-        )
+                | (Self::U12_MASK & u128::from(*l2_7)) << (44 + 6 * 12)
+        })
     }
 
     /// Returns the number of `1`-bits up to the beginning of the L1-block.
