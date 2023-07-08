@@ -27,8 +27,8 @@ test_sizes="
 131072000:128M
 262144000:256M
 524288000:512M
-"
-# 1073741824:1G
+1048576000:1G
+20971520000:2G"
 
 set -u
 
@@ -37,7 +37,7 @@ algo="${1}"
 for size in $test_sizes; do
     num_values=${size%:*}
     num_values_readable=${size#*:}
-    num_queries=50000000
-    input_path="${2}/${3}.${num_values_readable}"
+    num_queries=${2}
+    input_path="${3}/${4}.${num_values_readable}"
     ${bin} "${algo}" "${input_path}" ${num_values} ${num_queries}
 done

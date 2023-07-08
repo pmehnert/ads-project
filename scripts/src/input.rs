@@ -1,13 +1,13 @@
 use std::{
+    assert_matches::assert_matches,
     cmp,
-    collections::HashSet,
     error::Error,
     io::{self, BufRead, Lines},
     iter,
     ops::RangeInclusive,
 };
 
-use rand::{distributions::Uniform, prelude::Distribution};
+use rand::{distributions::Uniform, prelude::Distribution, seq::index};
 
 #[derive(Debug, Clone)]
 pub struct PredecessorInput {
@@ -25,15 +25,15 @@ impl PredecessorInput {
 
         let mut rng = rand::thread_rng();
 
-        let mut value_set = HashSet::with_capacity(num_values);
-        let value_dist = Uniform::from(range.clone());
-        while value_set.len() < num_values {
-            value_set.insert(value_dist.sample(&mut rng));
-        }
-
-        let mut values: Vec<_> = value_set.into_iter().collect();
-        assert_eq!(num_values, values.len());
+        // todo this techinally looses a value
+        let (lower, upper) = (*range.start(), *range.end());
+        let size = upper.saturating_add(1).saturating_sub(lower);
+        let samples = index::sample(&mut rng, size as usize, num_values);
+        let mut values: Vec<_> = samples.iter().map(|x| lower + x as u64).collect();
         values.sort();
+
+        assert!(values.iter().all(|&x| lower <= x && x <= upper));
+        assert_matches!(values.clone().partition_dedup(), (_, []));
 
         let queries = Uniform::new_inclusive(values[0], *range.end())
             .sample_iter(&mut rng)

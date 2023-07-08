@@ -1,3 +1,6 @@
+#![feature(assert_matches)]
+#![feature(slice_partition_dedup)]
+
 use std::{error::Error, fs, io};
 
 use check::Output;
