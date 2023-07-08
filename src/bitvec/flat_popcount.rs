@@ -3,7 +3,7 @@
 use std::{borrow::Borrow, fmt, iter::zip};
 
 use super::{block::BitIndex, AlignedBlock, BitVec, Block};
-use crate::AllocationSize;
+use crate::{div_ceil, AllocationSize};
 
 /// Various static characteristic values of the flat-popcount data structure.
 #[allow(unused)]
@@ -26,7 +26,7 @@ pub mod config {
     pub const SELECT_SAMPLE_RATE: u64 = 8192;
 }
 
-/// An index into [`FlatPopcount::data`], hinting at the position of a `1`-bit.
+/// An index into [`FlatPopcount::data`], hinting at the position of a `1`-or `0`-bit.
 ///
 /// The data structure supports up to `2^44` bits and each L1 blocks spans
 /// `2^12` bits, which limits the number of L1 blocks to `2^32`. Therefore,
@@ -72,7 +72,7 @@ pub struct FlatPopcount<Bits> {
 /// The type is guaranteed to have a size and alignment of 128 bit. Using [Zig]s
 /// wonderful integer types, the struct's members could be declared as follows:
 ///
-/// ```
+/// ```zig
 /// const L1Data = packed struct {
 ///     l1_ones: u44,
 ///     l2_ones: packed struct {
@@ -113,8 +113,9 @@ impl<Bits: Borrow<BitVec>> FlatPopcount<Bits> {
         }
 
         assert_eq!(AlignedBlock::BLOCKS, config::L2_SIZE_U64);
+        assert_eq!(AlignedBlock::BITS, config::L2_SIZE_BITS);
         let aligned_blocks = bitvec.borrow().aligned_blocks();
-        let l1_count = crate::div_ceil(aligned_blocks.len(), config::L2_PER_L1);
+        let l1_count = div_ceil(aligned_blocks.len(), config::L2_PER_L1);
 
         // Unfourtunately, Rust is not emitting an alloc_zeroed here
         let mut data = Vec::with_capacity(l1_count);
@@ -136,6 +137,7 @@ impl<Bits: Borrow<BitVec>> FlatPopcount<Bits> {
             total_ones += u64::from(l1_ones);
         }
 
+        // todo maybe always push a guardian L1L2Data
         // Write L1L2Data for the partially filled L1 bock if one exists
         if !l1_blocks.remainder().is_empty() {
             let (mut l1_ones, mut l2_ones) = (0u16, [0u16; 8]);
@@ -152,29 +154,35 @@ impl<Bits: Borrow<BitVec>> FlatPopcount<Bits> {
             total_ones += u64::from(l1_ones);
         }
 
-        // Derive number of required one/zero hints and write them out
-        let mut one_hints = Vec::with_capacity(crate::div_ceil(
-            total_ones as usize,
-            config::SELECT_SAMPLE_RATE as usize,
-        ));
-        let mut zero_hints = Vec::with_capacity(crate::div_ceil(
-            (aligned_blocks.len() * AlignedBlock::BITS) - total_ones as usize,
-            config::SELECT_SAMPLE_RATE as usize,
-        ));
-        let (mut next_one_hint, mut next_zero_hint) = (0, 0);
+        #[doc(hidden)]
+        fn collect_b_hints<F>(total_bs: u64, data: &[L1L2Data], rank_b: F) -> Vec<Hint>
+        where
+            F: Fn(u64, usize) -> u64,
+        {
+            let cap = div_ceil(total_bs as usize, config::SELECT_SAMPLE_RATE as usize);
+            let mut hints = Vec::<u32>::with_capacity(cap);
+            let mut next_hint = 0;
 
-        for (i, data) in zip(0u32.., &data) {
-            let l1_ones = data.l1_ones();
-            let l1_zeros = u64::from(i) * config::L1_SIZE_BITS as u64 - l1_ones;
-            if l1_ones >= next_one_hint {
-                next_one_hint += config::SELECT_SAMPLE_RATE;
-                one_hints.push(i);
+            for (i, data) in zip(0u32.., data).skip(1) {
+                let num_bits = i as usize * config::L1_SIZE_BITS;
+                let l1_rank = rank_b(data.l1_ones(), num_bits);
+                if l1_rank >= next_hint {
+                    next_hint += config::SELECT_SAMPLE_RATE;
+                    hints.push(i - 1);
+                }
             }
-            if l1_zeros >= next_zero_hint {
-                next_zero_hint += config::SELECT_SAMPLE_RATE;
-                zero_hints.push(i);
+            if total_bs as u64 >= next_hint {
+                hints.push(data.len().saturating_sub(1) as u32);
             }
+            hints
         }
+
+        assert!(config::SELECT_SAMPLE_RATE >= config::L1_SIZE_BITS as u64);
+        let one_hints = collect_b_hints(total_ones, &data, |ones, _| ones);
+
+        // todo could I just use `total_zeros` instead?
+        let zeros = aligned_blocks.len() as u64 * AlignedBlock::BITS as u64;
+        let zero_hints = collect_b_hints(zeros, &data, |ones, size| size as u64 - ones);
 
         let total_zeros = bitvec.borrow().len() as u64 - total_ones;
         Self { bitvec, data, one_hints, zero_hints, total_ones, total_zeros }
@@ -283,6 +291,7 @@ impl<Bits: Borrow<BitVec>> FlatPopcount<Bits> {
         }
     }
 
+    // todo add RankB as proper type or struct or similar
     /// Returns the index of the first `0`-bit with the given rank, i.e. the
     /// `rank`th `0`-bit (see also [`select1`](Self::select1)).
     ///
@@ -294,7 +303,7 @@ impl<Bits: Borrow<BitVec>> FlatPopcount<Bits> {
             let hint_index = (rank / config::SELECT_SAMPLE_RATE) as usize;
             let hint = self.zero_hints[hint_index] as usize;
 
-            self.select_b(rank, hint, |ones, idx| idx as u64 - ones, Block::select0)
+            self.select_b(rank, hint, |ones, size| size as u64 - ones, Block::select0)
         } else {
             select_out_of_bounds_fail(rank, self.total_zeros, false)
         }
@@ -312,7 +321,6 @@ impl<Bits: Borrow<BitVec>> FlatPopcount<Bits> {
         mut rank_b: impl FnMut(u64, usize) -> u64,
         mut select_b: impl FnMut(Block, u32) -> u32,
     ) -> usize {
-        debug_assert!(self.data[hint].l1_ones() <= rank);
         let (l1_index, l1_data) = zip(hint.., &self.data[hint..])
             .take_while(|(i, l1_data)| {
                 let l1_bits = i * config::L1_SIZE_BITS;
@@ -385,6 +393,9 @@ impl L1L2Data {
     // todo the general case here is terrible
     // todo what about out of bounds
     /// Returns the number of `1`-bits from the beginning of the L1-block up to the given L2-block.
+    ///
+    /// todo
+    /// _A note on performance_: The compiler can only optimize this function
     pub fn l2_ones(self, index: usize) -> u16 {
         if index > 0 {
             (Self::U12_MASK & (self.0 >> (index * 12 + 44 - 12))) as u16
