@@ -8,8 +8,8 @@ pub mod rmq;
 use std::{
     error::Error,
     fmt, fs, hint,
-    io::{BufRead, BufReader, Lines, Write},
-    path::PathBuf,
+    io::{BufRead, BufReader, BufWriter, Lines, Write},
+    path::{Path, PathBuf},
     process::{ExitCode, Termination},
     time::{Duration, Instant},
 };
@@ -33,75 +33,117 @@ pub fn main() -> std::result::Result<TestResults, String> {
         (result, elapsed)
     }
 
-    fn run_pd(input: PredecessorInput, algo: Algorithm) -> Measurements {
+    fn run_pd(
+        out: &Path,
+        input: PredecessorInput,
+        algo: Algorithm,
+    ) -> Result<Measurements> {
         match algo {
-            Algorithm::EliasFano => run_pd_with_algo(&input, EliasFano::new),
-            Algorithm::BinarySearch => run_pd_with_algo(&input, BinarySearch::new),
+            Algorithm::EliasFano => run_pd_with_algo(out, &input, EliasFano::new),
+            Algorithm::BinarySearch => run_pd_with_algo(out, &input, BinarySearch::new),
             algo => unreachable!("{algo}"),
         }
     }
 
-    fn run_pd_with_algo<'a, Init, Algo>(
+    fn run_pd_with_algo<'a, Algo: Predecessor + AllocationSize>(
+        out: &Path,
         input: &'a PredecessorInput,
-        init: Init,
-    ) -> Measurements
-    where
-        Init: FnOnce(&'a [u64]) -> Algo,
-        Algo: Predecessor + AllocationSize,
-    {
+        init: impl FnOnce(&'a [u64]) -> Algo,
+    ) -> Result<Measurements> {
         let (pd, init_time) = run_timed(|| init(&input.values));
+<<<<<<< HEAD
 
         let (_, query_time) = run_timed(|| {
             for query in &input.queries {
                 hint::black_box(pd.predecessor(*query).unwrap_or(u64::MAX));
             }
         });
+=======
+        let predecessor = |&query| pd.predecessor(query).unwrap_or(0);
+        let query_time = run_queries(out, &input.queries, predecessor)?;
+>>>>>>> bc086af (feat: reimplement writing of query results)
 
         let (values, queries) = (input.values.len(), input.queries.len());
-        let space = 8 * pd.size_bytes() + 8 * std::mem::size_of::<EliasFano>();
+        let space = 8 * pd.size_bytes() + std::mem::size_of_val(&pd);
 
-        Measurements { values, queries, init_time, query_time, space }
+        Ok(Measurements { values, queries, init_time, query_time, space })
     }
 
-    fn run_rmq(input: RMQInput, algo: Algorithm) -> Measurements {
+    fn run_rmq(out: &Path, input: RMQInput, algo: Algorithm) -> Result<Measurements> {
         match &input.values {
-            values if fits_index::<u16>(values) => run_rmq_with_index::<u16>(input, algo),
-            values if fits_index::<u32>(values) => run_rmq_with_index::<u32>(input, algo),
-            _ => run_rmq_with_index::<usize>(input, algo),
+            xs if fits_index::<u16>(xs) => run_rmq_with_index::<u16>(out, input, algo),
+            xs if fits_index::<u32>(xs) => run_rmq_with_index::<u32>(out, input, algo),
+            _ => run_rmq_with_index::<usize>(out, input, algo),
         }
     }
 
-    fn run_rmq_with_index<Idx>(input: RMQInput, algo: Algorithm) -> Measurements
+    fn run_rmq_with_index<Idx>(
+        out: &Path,
+        input: RMQInput,
+        algo: Algorithm,
+    ) -> Result<Measurements>
     where
         Idx: IndexInt + AsHalfSize,
         Idx::HalfSize: IndexInt,
     {
         match algo {
-            Algorithm::Naive => run_rmq_with_algo(&input, Naive::<Idx>::new),
-            Algorithm::Sparse => run_rmq_with_algo(&input, Sparse::<Idx, &[_]>::new),
-            Algorithm::Cartesian => run_rmq_with_algo(&input, Cartesian::<Idx>::new),
+            Algorithm::Naive => run_rmq_with_algo(out, &input, Naive::<Idx>::new),
+            Algorithm::Sparse => run_rmq_with_algo(out, &input, Sparse::<Idx, &[_]>::new),
+            Algorithm::Cartesian => run_rmq_with_algo(out, &input, Cartesian::<Idx>::new),
             algo => unreachable!("{algo}"),
         }
     }
 
-    fn run_rmq_with_algo<'a, Init, Algo>(input: &'a RMQInput, init: Init) -> Measurements
-    where
-        Init: FnOnce(&'a [u64]) -> Algo,
-        Algo: RangeMinimum<Output = usize> + AllocationSize,
-    {
+    fn run_rmq_with_algo<'a, Algo: RangeMinimum<Output = usize> + AllocationSize>(
+        out: &Path,
+        input: &'a RMQInput,
+        init: impl FnOnce(&'a [u64]) -> Algo,
+    ) -> Result<Measurements> {
         let (rmq, init_time) = run_timed(|| init(&input.values));
+        let range_min = |&(lower, upper)| rmq.range_min(lower, upper).unwrap();
+        let query_time = run_queries(out, &input.queries, range_min)?;
+
+        let (values, queries) = (input.values.len(), input.queries.len());
+        let space = 8 * rmq.size_bytes() + 8 * std::mem::size_of_val(&rmq);
+
+        Ok(Measurements { values, queries, init_time, query_time, space })
+    }
+
+
+    fn run_queries<'a, T, R: fmt::Display>(
+        #[allow(unused)] out: &Path,
+        queries: &'a [T],
+        f: impl Fn(&'a T) -> R,
+    ) -> Result<Duration> {
+        #[cfg(feature = "output")]
+        let mut results = Vec::<R>::new();
 
         let (_, query_time) = run_timed(|| {
-            for &(lower, upper) in &input.queries {
-                hint::black_box(rmq.range_min(lower, upper).unwrap());
+            for query in queries {
+                #[cfg(feature = "output")]
+                results.push(f(query));
+
+                #[cfg(not(feature = "output"))]
+                hint::black_box(f(query));
             }
         });
 
-        let space = 8 * rmq.size_bytes() + 8 * std::mem::size_of_val(&rmq);
+        #[cfg(feature = "output")]
+        write_results(out, &results)?;
 
-        let (values, queries) = (input.values.len(), input.queries.len());
+        Ok(query_time)
+    }
 
-        Measurements { values, queries, init_time, query_time, space }
+    #[allow(dead_code)]
+    fn write_results<T: fmt::Display>(out_path: &Path, results: &[T]) -> Result<()> {
+        let out_file = fs::OpenOptions::new()
+            .write(true)
+            .truncate(true)
+            .create(true)
+            .open(out_path)?;
+        let mut writer = BufWriter::new(out_file);
+        results.iter().try_for_each(|x| writeln!(writer, "{x}"))?;
+        Ok(())
     }
 
     fn run() -> Result<TestResults> {
@@ -110,8 +152,14 @@ pub fn main() -> std::result::Result<TestResults, String> {
         let reader = BufReader::new(input_file);
 
         let measurements = match args.problem {
-            Problem::Predecessor => run_pd(PredecessorInput::parse(reader)?, args.algo),
-            Problem::RangeMinimumQuery => run_rmq(RMQInput::parse(reader)?, args.algo),
+            Problem::Predecessor => {
+                let input = PredecessorInput::parse(reader)?;
+                run_pd(&args.out_path, input, args.algo)?
+            },
+            Problem::RangeMinimumQuery => {
+                let input = RMQInput::parse(reader)?;
+                run_rmq(&args.out_path, input, args.algo)?
+            },
         };
 
         let Arguments { name, problem, algo, .. } = args;
@@ -174,6 +222,7 @@ impl Arguments {
         }?;
 
         let algo = match args.next().as_deref() {
+            Some("binary") => Ok(Algorithm::BinarySearch),
             Some("elias_fano") => Ok(Algorithm::EliasFano),
             Some("naive") => Ok(Algorithm::Naive),
             Some("sparse") => Ok(Algorithm::Sparse),

@@ -1,5 +1,4 @@
 use std::{
-    assert_matches::assert_matches,
     cmp,
     error::Error,
     io::{self, BufRead, Lines},

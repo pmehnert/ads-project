@@ -2,7 +2,7 @@
 
 set -u
 
-run="cargo run --release"
+run="cargo run --features=output --release"
 check="cargo -Z unstable-options -C scripts run --release check"
 
 name="${1}"
