@@ -37,6 +37,9 @@ pub fn main() -> std::result::Result<TestResults, String> {
     fn run_pd(input: PredecessorInput) -> (Vec<u64>, usize) {
         let pd = EliasFano::new(&input.values);
 
+        // Don't need to keep values in memory
+        std::mem::drop(input.values);
+
         // todo question: what if value < minimum?
         let predecessor = |value| pd.predecessor(value).unwrap_or(0);
         let results = input.queries.iter().copied().map(predecessor).collect();
