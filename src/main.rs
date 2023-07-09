@@ -50,18 +50,10 @@ pub fn main() -> std::result::Result<TestResults, String> {
         input: &'a PredecessorInput,
         init: impl FnOnce(&'a [u64]) -> Algo,
     ) -> Result<Measurements> {
-        let (pd, init_time) = run_timed(|| init(&input.values));
-<<<<<<< HEAD
+        let (pd, init_time) = run_timed(|| hint::black_box(init(&input.values)));
 
-        let (_, query_time) = run_timed(|| {
-            for query in &input.queries {
-                hint::black_box(pd.predecessor(*query).unwrap_or(u64::MAX));
-            }
-        });
-=======
-        let predecessor = |&query| pd.predecessor(query).unwrap_or(0);
+        let predecessor = |&query| pd.predecessor(query).unwrap_or(u64::MAX);
         let query_time = run_queries(out, &input.queries, predecessor)?;
->>>>>>> bc086af (feat: reimplement writing of query results)
 
         let (values, queries) = (input.values.len(), input.queries.len());
         let space = 8 * pd.size_bytes() + std::mem::size_of_val(&pd);
@@ -99,7 +91,7 @@ pub fn main() -> std::result::Result<TestResults, String> {
         input: &'a RMQInput,
         init: impl FnOnce(&'a [u64]) -> Algo,
     ) -> Result<Measurements> {
-        let (rmq, init_time) = run_timed(|| init(&input.values));
+        let (rmq, init_time) = run_timed(|| hint::black_box(init(&input.values)));
         let range_min = |&(lower, upper)| rmq.range_min(lower, upper).unwrap();
         let query_time = run_queries(out, &input.queries, range_min)?;
 
@@ -274,8 +266,8 @@ impl Termination for TestResults {
             self.algo,
             self.measurements.values,
             self.measurements.queries,
-            self.measurements.init_time.as_millis(),
-            self.measurements.query_time.as_millis(),
+            self.measurements.init_time.as_nanos(),
+            self.measurements.query_time.as_nanos(),
             self.measurements.space,
         );
         ExitCode::SUCCESS
