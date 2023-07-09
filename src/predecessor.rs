@@ -15,6 +15,13 @@ use crate::{
     AllocationSize,
 };
 
+/// A trait for types that can be used to answer predecessor queries.
+pub trait Predecessor {
+    /// Returns the predecessor of `value` in `self`.
+    fn predecessor(&self, value: u64) -> Option<u64>;
+}
+
+// todo implement predecessor using binary search
 /// An implementation of the quasi-succinct Elias-Fano coding for answering
 /// predecessor queries.
 ///
@@ -50,10 +57,20 @@ impl EliasFano {
 
         Self { upper_half, lower_half, maximum: Some(maximum) }
     }
+}
 
+impl AllocationSize for EliasFano {
+    fn size_bytes(&self) -> usize {
+        self.upper_half.size_bytes()
+            + self.upper_half.bitvec().size_bytes()
+            + self.lower_half.size_bytes()
+    }
+}
+
+impl Predecessor for EliasFano {
     /// Returns the [predecessor](crate::predecessor#predecessor-problem) of
     /// `value` in the integer array encoded by this instance.
-    pub fn predecessor(&self, value: u64) -> Option<u64> {
+    fn predecessor(&self, value: u64) -> Option<u64> {
         let value_upper = value >> self.lower_half.int_bits();
         let value_lower = value & self.lower_half.mask();
         if value_upper >= self.upper_half.count_zeros() {
@@ -87,14 +104,6 @@ impl EliasFano {
                 Some((pred_upper << self.lower_half.int_bits()) | pred_lower)
             },
         }
-    }
-}
-
-impl AllocationSize for EliasFano {
-    fn size_bytes(&self) -> usize {
-        self.upper_half.size_bytes()
-            + self.upper_half.bitvec().size_bytes()
-            + self.lower_half.size_bytes()
     }
 }
 
@@ -147,7 +156,7 @@ impl<'a> FusedIterator for EliasFanoUpperIter<'a> {}
 mod test {
     use std::{iter::repeat, iter::zip, mem::replace};
 
-    use super::EliasFano;
+    use super::{EliasFano, Predecessor};
 
     const SLIDES_EXAMPLE: [u64; 10] = [0, 1, 2, 4, 7, 10, 20, 21, 22, 32];
 

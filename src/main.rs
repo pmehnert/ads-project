@@ -16,7 +16,7 @@ use std::{
 
 use crate::{
     int::{AsHalfSize, IndexInt},
-    predecessor::EliasFano,
+    predecessor::{EliasFano, Predecessor},
     rmq::{fits_index, RangeMinimum, Sparse},
 };
 
