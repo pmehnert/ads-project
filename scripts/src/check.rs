@@ -13,7 +13,7 @@ impl Output<u64> {
         for (query, actual) in zip(&input.queries, &self.results) {
             let expected = match input.values.binary_search(&query) {
                 Ok(idx) => input.values[idx],
-                Err(0) => panic!("query {query} has no predecessor"),
+                Err(0) => u64::MAX,
                 Err(idx) => input.values[idx - 1],
             };
 

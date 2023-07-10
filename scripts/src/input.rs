@@ -6,7 +6,7 @@ use std::{
     ops::RangeInclusive,
 };
 
-use rand::{distributions::Uniform, prelude::Distribution, seq::index};
+use rand::{distributions::Uniform, prelude::Distribution};
 
 #[derive(Debug, Clone)]
 pub struct PredecessorInput {
@@ -23,22 +23,13 @@ impl PredecessorInput {
         assert!(num_values > 0);
 
         let mut rng = rand::thread_rng();
+        let mut sampler = Uniform::from(range).sample_iter(&mut rng);
 
-        // todo this techinally looses a value
-        let (lower, upper) = (*range.start(), *range.end());
-        let size = upper.saturating_add(1).saturating_sub(lower);
-        let samples = index::sample(&mut rng, size as usize, num_values);
-        let mut values: Vec<_> = samples.iter().map(|x| lower + x as u64).collect();
-        values.sort();
+        let values: Vec<_> = sampler.by_ref().take(num_values).collect();
+        let queries: Vec<_> = sampler.take(num_queries).collect();
 
-        // assert_eq!(num_values, values.len());
-        // assert!(values.iter().all(|&x| lower <= x && x <= upper));
-        // assert_matches!(values.clone().partition_dedup(), (_, []));
-
-        let queries = Uniform::new_inclusive(values[0], *range.end())
-            .sample_iter(&mut rng)
-            .take(num_queries)
-            .collect::<Vec<_>>();
+        assert_eq!(num_values, values.len());
+        assert_eq!(num_queries, queries.len());
 
         Self { values, queries }
     }
