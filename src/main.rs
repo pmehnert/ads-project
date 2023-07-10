@@ -17,7 +17,7 @@ use std::{
 use crate::{
     int::{AsHalfSize, IndexInt},
     predecessor::{EliasFano, Predecessor},
-    rmq::{fits_index, RangeMinimum, Sparse},
+    rmq::{fits_index, RangeMinimum},
 };
 
 pub type Result<T> = std::result::Result<T, Box<dyn Error>>;
@@ -40,8 +40,7 @@ pub fn main() -> std::result::Result<TestResults, String> {
         // Don't need to keep values in memory
         std::mem::drop(input.values);
 
-        // todo question: what if value < minimum?
-        let predecessor = |value| pd.predecessor(value).unwrap_or(0);
+        let predecessor = |value| pd.predecessor(value).unwrap_or(u64::MAX);
         let results = input.queries.iter().copied().map(predecessor).collect();
         let space = 8 * pd.size_bytes() + 8 * std::mem::size_of::<EliasFano>();
 
@@ -62,6 +61,9 @@ pub fn main() -> std::result::Result<TestResults, String> {
         Idx: IndexInt + AsHalfSize,
         Idx::HalfSize: IndexInt,
     {
+        #[allow(unused_imports)]
+        use crate::rmq::{Cartesian, Naive, Sparse};
+
         // let rmq = Naive::<Idx>::new(&input.values);
         let rmq = Sparse::<Idx, &[_]>::new(&input.values);
         // let rmq = Cartesian::<Idx>::new(&input.values);
@@ -169,7 +171,7 @@ impl Termination for TestResults {
     fn report(self) -> ExitCode {
         let _ = writeln!(
             std::io::stderr(),
-            "RESULT algo={} namepascal_mehnert time={} space={}",
+            "RESULT algo={} name=pascal_mehnert time={} space={}",
             self.algo,
             self.time.as_millis(),
             self.space,
@@ -212,7 +214,6 @@ pub struct PredecessorInput {
     queries: Vec<u64>,
 }
 
-// todo what about repeated values
 impl PredecessorInput {
     pub fn parse(reader: impl BufRead) -> Result<Self> {
         let mut lines = reader.lines();

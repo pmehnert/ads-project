@@ -232,6 +232,29 @@ mod test {
     }
 
     #[test]
+    fn test_example_blackboard() {
+        const U32_MAX: u64 = 2u64.pow(32) - 1;
+        let values = [1, 2, 3, 4, 5, 6, 7, 8, U32_MAX];
+        let elias = EliasFano::new(&values);
+        for (i, expected) in zip(0.., predecessors(&values).take(100)) {
+            assert_eq!(expected, elias.predecessor(i));
+        }
+        assert_eq!(Some(U32_MAX), elias.predecessor(U32_MAX));
+        assert_eq!(Some(U32_MAX), elias.predecessor(U32_MAX + 1));
+    }
+
+    #[test]
+    fn test_repeated() {
+        let values = [1094, 1409, 2494, 2494, 2494, 7911, 7911, 8233, 8478, 9168, 9168];
+        let binary = BinarySearch::new(&values);
+        let elias = EliasFano::new(&values);
+        for (i, expected) in zip(0.., predecessors(&values).take(10_000)) {
+            assert_eq!(expected, binary.predecessor(i));
+            assert_eq!(expected, elias.predecessor(i));
+        }
+    }
+
+    #[test]
     fn test_large_universe() {
         #[rustfmt::skip]
         let values = [

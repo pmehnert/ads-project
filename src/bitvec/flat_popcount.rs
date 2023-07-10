@@ -178,7 +178,6 @@ impl<Bits: Borrow<BitVec>> FlatPopcount<Bits> {
         assert!(config::SELECT_SAMPLE_RATE >= config::L1_SIZE_BITS as u64);
         let one_hints = collect_b_hints(total_ones, &data, |ones, _| ones);
 
-        // todo could I just use `total_zeros` instead?
         let zeros = aligned_blocks.len() as u64 * AlignedBlock::BITS as u64;
         let zero_hints = collect_b_hints(zeros, &data, |ones, size| size as u64 - ones);
 

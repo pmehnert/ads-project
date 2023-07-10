@@ -97,6 +97,7 @@ impl<Idx: IndexInt> RangeMinimum for Naive<Idx> {
         if lower <= upper && upper < self.len {
             // Calculate N + (N-1) + ... + (N-(b-a)+1)
             // where N := self.len, a := lower, b := upper
+            // todo can this be done with fewer instructions?
             let from = self.len - (upper - lower) + 1;
             let offset = (self.len + 1 - from) * (from + self.len) / 2;
 
@@ -128,7 +129,6 @@ pub struct Sparse<Idx, Values> {
     values: Values,
 }
 
-// todo sparse table needs to be linearized
 impl<Idx: IndexInt, Values: Borrow<[u64]>> Sparse<Idx, Values> {
     /// Constructs the sparse table data structure using dynamic programming.
     ///
@@ -170,13 +170,8 @@ impl<Idx, Values: Default> Default for Sparse<Idx, Values> {
     fn default() -> Self { Self { table: Vec::new(), values: Default::default() } }
 }
 
-impl<Idx, Values: AllocationSize> AllocationSize for Sparse<Idx, Values> {
-    // todo do values need to be included here?
-    fn size_bytes(&self) -> usize { self.table.size_bytes() + self.values.size_bytes() }
-}
-
-impl<Idx> AllocationSize for Sparse<Idx, &[u64]> {
-    fn size_bytes(&self) -> usize { self.table.size_bytes() + self.values.size_bytes() }
+impl<Idx, Values> AllocationSize for Sparse<Idx, Values> {
+    fn size_bytes(&self) -> usize { self.table.size_bytes() }
 }
 
 impl<Idx: IndexInt, Values: Borrow<[u64]>> RangeMinimum for Sparse<Idx, Values> {
@@ -253,7 +248,6 @@ where
             index_too_small_fail::<Idx>(values.len());
         }
 
-        // todo add template parameter to "round up" blocks
         let reprs = Representatives::<Idx>::new(values);
         let block_size = reprs.block_size();
         let table = CartesianTable::<Idx::HalfSize>::new(block_size);
@@ -272,10 +266,7 @@ where
     Idx::HalfSize: IndexInt,
 {
     fn size_bytes(&self) -> usize {
-        self.reprs.size_bytes()
-            + self.table.size_bytes()
-            + self.types.size_bytes()
-            + self.values.size_bytes()
+        self.reprs.size_bytes() + self.table.size_bytes() + self.types.size_bytes()
     }
 }
 
@@ -298,7 +289,7 @@ where
 
         if lower <= upper && upper < self.values.len() {
             let block_size = self.reprs.block_size();
-            // TODO I am deeply unhappy with these divisions on a hot code path
+            // I am deeply unhappy with these divisions on a hot code path
             let (lower_block, lower_rem) = div_mod(lower, block_size);
             let (upper_block, upper_rem) = div_mod(upper, block_size);
 
