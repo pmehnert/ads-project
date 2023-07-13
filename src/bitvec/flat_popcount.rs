@@ -426,7 +426,7 @@ impl fmt::Debug for L1L2Data {
 #[inline(never)]
 #[track_caller]
 fn index_out_of_bounds_fail(index: usize, len: usize) -> ! {
-    panic!("index out of bounds: the length is {} but the index is {}", len, index)
+    panic!("index out of bounds: the length is {len} but the index is {index}")
 }
 
 #[doc(hidden)]

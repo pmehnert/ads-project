@@ -55,6 +55,7 @@ impl<'a> Predecessor for BinarySearch<'a> {
 pub struct EliasFano {
     upper_half: RankSelect<BitVec>,
     lower_half: PackedArray,
+    minimum: u64,
     maximum: Option<u64>,
 }
 
@@ -65,6 +66,7 @@ impl EliasFano {
     /// not, the program may panic or produce unexpected results, but will not
     /// result in undefined behaviour.
     pub fn new(values: &[u64]) -> Self {
+        let minimum = values.first().copied().unwrap_or(u64::MAX);
         let maximum = match values.last() {
             Some(last) => *last,
             None => return Default::default(),
@@ -78,7 +80,7 @@ impl EliasFano {
         let upper_half = RankSelect::new(upper_iter.collect());
         let lower_half = PackedArray::new(lower_bits, values.iter().copied());
 
-        Self { upper_half, lower_half, maximum: Some(maximum) }
+        Self { upper_half, lower_half, minimum, maximum: Some(maximum) }
     }
 }
 
@@ -94,6 +96,10 @@ impl Predecessor for EliasFano {
     /// Returns the [predecessor](crate::predecessor#predecessor-problem) of
     /// `value` in the integer array encoded by this instance.
     fn predecessor(&self, value: u64) -> Option<u64> {
+        if value < self.minimum {
+            return None;
+        }
+
         let value_upper = value >> self.lower_half.int_bits();
         let value_lower = value & self.lower_half.mask();
         if value_upper >= self.upper_half.count_zeros() {

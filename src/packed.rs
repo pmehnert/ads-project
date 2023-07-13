@@ -89,6 +89,7 @@ impl PackedArray {
     /// Returns an iterator over the elements of the array.
     pub fn iter(&self) -> Iter<'_> { Iter::new(self) }
 
+    /// Returns the integer at position `index`.
     pub fn index(&self, index: usize) -> u64 {
         let start = index * self.size_bytes.get();
         let slice = &self.bytes[start..start + 8];
