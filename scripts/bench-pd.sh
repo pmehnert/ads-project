@@ -22,10 +22,10 @@ do
 
         for run in $(seq 1 ${num_runs})
         do
-            echo "Run ${run}: pd/${algo} (${input_path})"
+            >&2 echo "Run ${run}: pd/${algo} (${input_path})"
             if ! ${bin_pd}
             then
-                echo "Failed"
+                >&2 echo "Failed"
             fi
         done
     done

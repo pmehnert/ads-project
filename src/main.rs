@@ -259,7 +259,7 @@ impl Termination for TestResults {
     fn report(self) -> ExitCode {
         let _ = writeln!(
             std::io::stdout(),
-            "RESULT name={} problem={} algo={} values={} queries={} \
+            "RESULT name={} problem={} algo={} num_values={} num_queries={} \
                 init_time={} query_time={} space={}",
             self.name,
             self.problem,
