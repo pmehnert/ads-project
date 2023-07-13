@@ -11,7 +11,7 @@ pub struct Output<T> {
 impl Output<u64> {
     pub fn check_pd(&self, input: &PredecessorInput) {
         for (query, actual) in zip(&input.queries, &self.results) {
-            let expected = match input.values.binary_search(&query) {
+            let expected = match input.values.binary_search(query) {
                 Ok(idx) => input.values[idx],
                 Err(0) => u64::MAX,
                 Err(idx) => input.values[idx - 1],

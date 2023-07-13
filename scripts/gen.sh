@@ -37,5 +37,6 @@ for size in $test_sizes; do
     num_values_readable=${size#*:}
     num_queries=${2}
     input_path="${3}/${4}.${num_values_readable}"
-    ${bin} "${algo}" "${input_path}" ${num_values} ${num_queries}
+    ranges="${5}"
+    ${bin} "${algo}" "${input_path}" ${num_values} ${num_queries} ${ranges}
 done

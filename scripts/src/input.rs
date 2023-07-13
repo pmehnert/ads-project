@@ -18,15 +18,22 @@ impl PredecessorInput {
     pub fn new(
         num_values: usize,
         num_queries: usize,
-        range: RangeInclusive<u64>,
+        ranges: &[RangeInclusive<u64>],
     ) -> Self {
         assert!(num_values > 0);
+        assert!(!ranges.is_empty());
 
         let mut rng = rand::thread_rng();
-        let mut sampler = Uniform::from(range).sample_iter(&mut rng);
+        let value_dists: Vec<_> = ranges.iter().cloned().map(Uniform::from).collect();
+        let idx_dist = Uniform::new(0, value_dists.len());
+        let mut sampler = iter::from_fn(|| {
+            Some(value_dists[idx_dist.sample(&mut rng)].sample(&mut rng))
+        });
 
-        let values: Vec<_> = sampler.by_ref().take(num_values).collect();
-        let queries: Vec<_> = sampler.take(num_queries).collect();
+        let mut values: Vec<_> = sampler.by_ref().take(num_values).collect();
+        let queries: Vec<_> = sampler.by_ref().take(num_queries).collect();
+
+        values.sort();
 
         assert_eq!(num_values, values.len());
         assert_eq!(num_queries, queries.len());

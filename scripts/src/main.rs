@@ -1,5 +1,5 @@
 #![feature(assert_matches)]
-#![feature(slice_partition_dedup)]
+#![feature(slice_partition_dedup, array_chunks)]
 
 use std::{error::Error, fs, io};
 
@@ -21,17 +21,32 @@ fn main() -> Result<()> {
 }
 
 fn run_gen(args: GenerateArguments) -> Result<()> {
-    let range = args.lower.unwrap_or(0)..=args.upper.unwrap_or(u64::MAX);
+    let ranges = match *args.ranges {
+        [] => Ok(vec![0..=u64::MAX]),
+        [lower, upper] => Ok(vec![lower..=upper]),
+        ref values => {
+            let chunks = values.array_chunks::<2>();
+            if chunks.remainder().is_empty() {
+                Ok(chunks.copied().map(|[l, r]| l..=r).collect())
+            } else {
+                Err("need to specific both upper and lower bound of ranges")
+            }
+        },
+    }?;
+
     let file = fs::OpenOptions::new().create(true).write(true).open(&args.path)?;
 
     match args.algo {
         Algorithm::Predecessor => {
-            let input = PredecessorInput::new(args.num_values, args.num_queries, range);
-            input.write(&mut io::BufWriter::new(file))?;
+            PredecessorInput::new(args.num_values, args.num_queries, &ranges)
+                .write(&mut io::BufWriter::new(file))?;
         },
         Algorithm::RangeMinimum => {
-            let input = RangeMinimumInput::new(args.num_values, args.num_queries, range);
-            input.write(&mut io::BufWriter::new(file))?;
+            let [ref range] = *ranges else {
+                return Err("RMQ only supprt single range".into());
+            };
+            RangeMinimumInput::new(args.num_values, args.num_queries, range.clone())
+                .write(&mut io::BufWriter::new(file))?;
         },
     }
     Ok(())
@@ -77,8 +92,7 @@ pub struct GenerateArguments {
     path: String,
     num_values: usize,
     num_queries: usize,
-    lower: Option<u64>,
-    upper: Option<u64>,
+    ranges: Vec<u64>,
 }
 
 #[derive(Args)]
