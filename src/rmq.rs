@@ -32,7 +32,6 @@ pub trait RangeMinimum {
     fn range_min(&self, lower: usize, upper: usize) -> Option<Self::Output>;
 }
 
-// todo add template parameter `bool Linearize`
 /// The naive approach for answering RMQs in `O(1)` time.
 ///
 /// Stores the answer for every possible query in `table` using `O(n²)` space.
@@ -97,7 +96,6 @@ impl<Idx: IndexInt> RangeMinimum for Naive<Idx> {
         if lower <= upper && upper < self.len {
             // Calculate N + (N-1) + ... + (N-(b-a)+1)
             // where N := self.len, a := lower, b := upper
-            // todo can this be done with fewer instructions?
             let from = self.len - (upper - lower) + 1;
             let offset = (self.len + 1 - from) * (from + self.len) / 2;
 

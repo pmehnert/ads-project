@@ -61,12 +61,9 @@ pub fn main() -> std::result::Result<TestResults, String> {
         Idx: IndexInt + AsHalfSize,
         Idx::HalfSize: IndexInt,
     {
-        #[allow(unused_imports)]
-        use crate::rmq::{Cartesian, Naive, Sparse};
-
-        // let rmq = Naive::<Idx>::new(&input.values);
-        let rmq = Sparse::<Idx, &[_]>::new(&input.values);
-        // let rmq = Cartesian::<Idx>::new(&input.values);
+        // let rmq = crate::rmq::Naive::<Idx>::new(&input.values);
+        let rmq = crate::rmq::Sparse::<Idx, &[_]>::new(&input.values);
+        // let rmq = crate::rmq::Cartesian::<Idx>::new(&input.values);
 
         let range_min = |(lower, upper)| rmq.range_min(lower, upper).unwrap();
         let results = input.queries.iter().copied().map(range_min).collect();
@@ -170,7 +167,7 @@ pub struct TestResults {
 impl Termination for TestResults {
     fn report(self) -> ExitCode {
         let _ = writeln!(
-            std::io::stderr(),
+            std::io::stdout(),
             "RESULT algo={} name=pascal_mehnert time={} space={}",
             self.algo,
             self.time.as_millis(),
