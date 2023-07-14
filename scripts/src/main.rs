@@ -21,31 +21,16 @@ fn main() -> Result<()> {
 }
 
 fn run_gen(args: GenerateArguments) -> Result<()> {
-    let ranges = match *args.ranges {
-        [] => Ok(vec![0..=u64::MAX]),
-        [lower, upper] => Ok(vec![lower..=upper]),
-        ref values => {
-            let chunks = values.array_chunks::<2>();
-            if chunks.remainder().is_empty() {
-                Ok(chunks.copied().map(|[l, r]| l..=r).collect())
-            } else {
-                Err("need to specific both upper and lower bound of ranges")
-            }
-        },
-    }?;
-
     let file = fs::OpenOptions::new().create(true).write(true).open(&args.path)?;
 
     match args.algo {
         Algorithm::Predecessor => {
-            PredecessorInput::new(args.num_values, args.num_queries, &ranges)
+            PredecessorInput::new(args.num_values, args.num_queries, args.split_bits)
                 .write(&mut io::BufWriter::new(file))?;
         },
         Algorithm::RangeMinimum => {
-            let [ref range] = *ranges else {
-                return Err("RMQ only supprt single range".into());
-            };
-            RangeMinimumInput::new(args.num_values, args.num_queries, range.clone())
+            assert!(args.split_bits.is_none(), "RMQ does not support partitioned range");
+            RangeMinimumInput::new(args.num_values, args.num_queries)
                 .write(&mut io::BufWriter::new(file))?;
         },
     }
@@ -92,7 +77,7 @@ pub struct GenerateArguments {
     path: String,
     num_values: usize,
     num_queries: usize,
-    ranges: Vec<u64>,
+    split_bits: Option<u32>,
 }
 
 #[derive(Args)]

@@ -25,18 +25,18 @@ test_sizes="
 32768000:32M
 65536000:64M
 131072000:128M
-262144000:256M
-524288000:512M"
-
-set -u
+262144000:256M"
 
 algo="${1}"
+base_path="${3}"
+
+mkdir -p "${base_path}"
 
 for size in $test_sizes; do
     num_values=${size%:*}
     num_values_readable=${size#*:}
     num_queries=${2}
-    input_path="${3}/${4}.${num_values_readable}"
-    ranges="${5}"
-    ${bin} "${algo}" "${input_path}" ${num_values} ${num_queries} ${ranges}
+    input_path="${base_path}/${4}.${num_values_readable}"
+    split_bits="${5}"
+    ${bin} "${algo}" "${input_path}" ${num_values} ${num_queries} ${split_bits}
 done

@@ -10,6 +10,7 @@ pub struct Output<T> {
 
 impl Output<u64> {
     pub fn check_pd(&self, input: &PredecessorInput) {
+        assert_eq!(input.queries.len(), self.results.len());
         for (query, actual) in zip(&input.queries, &self.results) {
             let expected = match input.values.binary_search(query) {
                 Ok(idx) => input.values[idx],
@@ -26,6 +27,7 @@ impl Output<u64> {
 
 impl Output<usize> {
     pub fn check_rmq(&self, input: &RangeMinimumInput) {
+        assert_eq!(input.queries.len(), self.results.len());
         for (&(lo, hi), &actual) in zip(&input.queries, &self.results) {
             let (_, expected) = zip(&input.values[lo..=hi], lo..).min().unwrap();
             let expected_value = input.values[expected];

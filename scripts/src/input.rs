@@ -3,10 +3,13 @@ use std::{
     error::Error,
     io::{self, BufRead, Lines},
     iter,
-    ops::RangeInclusive,
 };
 
-use rand::{distributions::Uniform, prelude::Distribution};
+use rand::{
+    distributions::{Standard, Uniform},
+    prelude::Distribution,
+    Rng,
+};
 
 #[derive(Debug, Clone)]
 pub struct PredecessorInput {
@@ -15,23 +18,32 @@ pub struct PredecessorInput {
 }
 
 impl PredecessorInput {
-    pub fn new(
-        num_values: usize,
-        num_queries: usize,
-        ranges: &[RangeInclusive<u64>],
-    ) -> Self {
+    pub fn new(num_values: usize, num_queries: usize, split_bits: Option<u32>) -> Self {
         assert!(num_values > 0);
-        assert!(!ranges.is_empty());
 
         let mut rng = rand::thread_rng();
-        let value_dists: Vec<_> = ranges.iter().cloned().map(Uniform::from).collect();
-        let idx_dist = Uniform::new(0, value_dists.len());
-        let mut sampler = iter::from_fn(|| {
-            Some(value_dists[idx_dist.sample(&mut rng)].sample(&mut rng))
-        });
 
-        let mut values: Vec<_> = sampler.by_ref().take(num_values).collect();
-        let queries: Vec<_> = sampler.by_ref().take(num_queries).collect();
+        let (mut values, queries) = match split_bits {
+            Some(bits) => {
+                assert!(bits < u64::BITS);
+                let mask = !(u64::MAX >> bits);
+
+                let mut sampler = iter::from_fn(|| {
+                    let upper = mask & if rng.sample(Standard) { u64::MAX } else { 0 };
+                    let lower = !mask & rng.sample::<u64, _>(Standard);
+                    Some(upper | lower)
+                });
+                let values: Vec<_> = sampler.by_ref().take(num_values).collect();
+                let queries: Vec<_> = sampler.take(num_queries).collect();
+                (values, queries)
+            },
+            None => {
+                let mut sampler = rng.sample_iter(Standard);
+                let values: Vec<_> = sampler.by_ref().take(num_values).collect();
+                let queries: Vec<_> = sampler.take(num_queries).collect();
+                (values, queries)
+            },
+        };
 
         values.sort();
 
@@ -67,19 +79,12 @@ pub struct RangeMinimumInput {
 }
 
 impl RangeMinimumInput {
-    pub fn new(
-        num_values: usize,
-        num_queries: usize,
-        range: RangeInclusive<u64>,
-    ) -> Self {
+    pub fn new(num_values: usize, num_queries: usize) -> Self {
         assert!(num_values > 0);
 
         let mut rng = rand::thread_rng();
 
-        let values = Uniform::from(range)
-            .sample_iter(&mut rng)
-            .take(num_values)
-            .collect::<Vec<_>>();
+        let values = Standard.sample_iter(&mut rng).take(num_values).collect::<Vec<_>>();
 
         // todo does this way of choosing ranges make sense?
         let idx_dist = Uniform::new(0usize, values.len());
