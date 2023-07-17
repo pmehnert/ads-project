@@ -151,7 +151,6 @@ impl<'a> Iterator for Iter<'a> {
     }
 }
 
-
 impl<'a> DoubleEndedIterator for Iter<'a> {
     fn next_back(&mut self) -> Option<Self::Item> {
         self.inner.next_back().map(self.map_fn())
@@ -165,7 +164,6 @@ impl<'a> DoubleEndedIterator for Iter<'a> {
 impl<'a> ExactSizeIterator for Iter<'a> {}
 
 impl<'a> FusedIterator for Iter<'a> {}
-
 
 #[cfg(test)]
 mod test {

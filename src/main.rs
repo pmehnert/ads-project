@@ -156,7 +156,6 @@ impl Arguments {
     }
 }
 
-
 #[derive(Debug, Clone, Copy)]
 pub struct TestResults {
     algo: Algorithm,
@@ -205,7 +204,6 @@ impl fmt::Display for ParseError {
     }
 }
 
-// todo allow for empty lines in input
 pub struct PredecessorInput {
     values: Vec<u64>,
     queries: Vec<u64>,
@@ -236,17 +234,16 @@ impl RMQInput {
         let values = parse_values(&mut lines)?;
 
         let mut queries = Vec::with_capacity(lines.size_hint().0);
-        for line in lines {
-            let line = line?;
-            let (left, right) = line.split_once(',').ok_or(ParseError::NotARange)?;
-            let (lower, upper) = (left.parse()?, right.parse()?);
-            if lower > upper {
-                return Err(ParseError::EmptyRange.into());
-            }
-            queries.push((lower, upper))
-        }
-
-        Ok(Self { values, queries })
+        lines
+            .try_for_each::<_, Result<()>>(|line| {
+                let line = line?;
+                let (left, right) = line.split_once(',').ok_or(ParseError::NotARange)?;
+                let (lower, upper) = (left.parse()?, right.parse()?);
+                (lower <= upper)
+                    .then(|| queries.push((lower, upper)))
+                    .ok_or_else(|| ParseError::EmptyRange.into())
+            })
+            .map(|_| Self { values, queries })
     }
 }
 
