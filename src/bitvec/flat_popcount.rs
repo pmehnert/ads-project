@@ -368,7 +368,6 @@ impl L1L2Data {
     ///
     /// Any bits that exceed the range of a `u44` or `u12` respectively are masked.
     #[allow(clippy::erasing_op, clippy::identity_op)]
-    #[inline(never)]
     pub fn new(l1_ones: u64, l2_ones: &[u16; 8]) -> Self {
         debug_assert_eq!(0, l2_ones[0]);
         debug_assert_eq!(l1_ones, l1_ones & Self::U44_MASK as u64);

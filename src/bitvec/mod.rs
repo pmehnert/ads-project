@@ -74,7 +74,6 @@ impl BitVec {
     ///
     /// The last [`AlignedBlock::BLOCKS`] elements may contain unused bits, which are
     /// guranteed to be set to `0`.
-    #[inline(never)]
     pub fn blocks(&self) -> &[Block] {
         let aligned = self.aligned_blocks();
 
